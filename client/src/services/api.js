@@ -231,4 +231,5 @@ export const toggleUpiQrPaid = (id) => api.put(`/upi-qr-history/${id}/toggle-pai
 export const deleteUpiQrHistory = (id) => api.delete(`/upi-qr-history/${id}`)
 export const clearUpiQrHistory = () => api.delete('/upi-qr-history')
 
-export default api
+export default api 
+// force rebuild 
