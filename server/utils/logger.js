@@ -16,11 +16,14 @@ const logger = winston.createLogger({
   ]
 });
 
-// Terminal mein bhi dikhe jaisa console.log pehle karta tha — sirf non-production mein
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.combine(winston.format.colorize(), winston.format.simple())
-  }));
-}
+// Render (aur zyadatar cloud/container platforms) sirf stdout/stderr capture
+// karte hain, disk-files ephemeral hote hain aur unke apne log-viewer mein
+// kabhi dikhte nahi — isliye demo-deploy debug karne ke liye Console-transport
+// hamesha zaroori hai, chahe NODE_ENV kuch bhi ho. (Production ke PM2/local
+// setup mein files persist hoti hain isliye wahan farak nahi padta, lekin
+// yahan is bina crash-reason kabhi dikhega hi nahi.)
+logger.add(new winston.transports.Console({
+  format: winston.format.combine(winston.format.colorize(), winston.format.simple())
+}));
 
 module.exports = logger;
