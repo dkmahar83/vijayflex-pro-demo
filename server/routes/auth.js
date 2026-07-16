@@ -16,9 +16,9 @@ const loginLimiter = rateLimit({
 const USERS = [
   {
     id: 1,
-    username: 'flexshop',
-    passwordHash: '$2b$10$GqZeCJBXUAWj9z1CRBLgLeLNN7NCTlxrSSosrlzpG2JhNpL3l3AnW',
-    name: 'FlexShop Manager'
+    username: 'demo',
+    passwordHash: '$2b$10$ETbSagGqGSUlsytNhqojTeMZ/WSaa4pGXujYMG4xrj82T1ikePJay',
+    name: 'Demo User'
   }
 ]
 
