@@ -1,7 +1,9 @@
 import axios from 'axios'
 
+const API_BASE = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:5000/api`
+
 const api = axios.create({
-  baseURL: `http://${window.location.hostname}:5000/api`
+  baseURL: API_BASE
 })
 
 api.interceptors.request.use(config => {
@@ -26,9 +28,9 @@ api.interceptors.response.use(
 
 // Auth
 export const login = (username, password) =>
-  axios.post(`http://${window.location.hostname}:5000/api/auth/login`, { username, password })
+  axios.post(`${API_BASE}/auth/login`, { username, password })
 export const verifyToken = (token) =>
-  axios.post(`http://${window.location.hostname}:5000/api/auth/verify`, { token })
+  axios.post(`${API_BASE}/auth/verify`, { token })
 
 // Dashboard
 export const getDashboard = () => api.get('/dashboard')
