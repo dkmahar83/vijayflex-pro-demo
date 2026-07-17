@@ -122,30 +122,66 @@ router.post('/', validate(createPaymentSchema), (req, res) => {
   });
 
 router.get('/dues', (req, res) => {
-  // CUSTOMER-WISE ab, Dashboard ke all_dues jaisa. 2 fixes ek saath:
-  // (1) opening_balance ab include hota hai, warna aise customers invisible
-  //     rehte jinka poora due sirf opening-balance se ho.
-  // (2) orders.deleted_at IS NULL filter add kiya — pehle missing tha, isliye
-  //     soft-deleted orders ka due bhi galti se yahan leak ho sakta tha.
+  // CUSTOMER-WISE, TRUE net-due formula — Dashboard ke all_dues jaisa hi
+  // (orders + opening_balance - advance - order_payments - UPI - cleared
+  // cheques - cash_income - discount + commission). orders_due neeche sirf
+  // INFORMATIONAL hai; total_due hi asal sorting/filtering karta hai.
   db.all(`
-    SELECT
-      customers.id as customer_id,
-      customers.firm_name,
-      customers.contact_name,
-      customers.phone,
-      COALESCE(SUM(orders.balance_due), 0) as orders_due,
-      COUNT(orders.id) as orders_due_count,
-      COALESCE(customers.opening_balance, 0) as opening_balance,
-      (COALESCE(SUM(orders.balance_due), 0) + COALESCE(customers.opening_balance, 0)) as total_due,
-      MIN(orders.follow_up_date) as follow_up_date
-    FROM customers
-    LEFT JOIN orders
-      ON orders.customer_id = customers.id
-      AND orders.balance_due > 0
-      AND orders.deleted_at IS NULL
-    WHERE customers.deleted_at IS NULL
-    GROUP BY customers.id
-    HAVING (COALESCE(SUM(orders.balance_due), 0) + COALESCE(customers.opening_balance, 0)) > 0
+    SELECT * FROM (
+      SELECT
+        c.id as customer_id,
+        c.firm_name,
+        c.contact_name,
+        c.phone,
+        COALESCE(oa.orders_due, 0) as orders_due,
+        COALESCE(oa.orders_due_count, 0) as orders_due_count,
+        COALESCE(c.opening_balance, 0) as opening_balance,
+        oa.follow_up_date as follow_up_date,
+        (
+          COALESCE(oa.orders_total, 0) + COALESCE(c.opening_balance, 0)
+          - COALESCE(oa.orders_advance, 0)
+          - COALESCE(pay.total_order_payments, 0)
+          - COALESCE(upi.total_upi, 0)
+          - COALESCE(cheq.total_cheque_cleared, 0)
+          - COALESCE(cash.total_cash_income, 0)
+          - COALESCE(oa.orders_discount, 0)
+          + COALESCE(comm.total_commission, 0)
+        ) as total_due
+      FROM customers c
+      LEFT JOIN (
+        SELECT customer_id,
+          SUM(total_amount) as orders_total,
+          SUM(discount_amount) as orders_discount,
+          SUM(advance_paid) as orders_advance,
+          SUM(CASE WHEN balance_due > 0 THEN balance_due ELSE 0 END) as orders_due,
+          SUM(CASE WHEN balance_due > 0 THEN 1 ELSE 0 END) as orders_due_count,
+          MIN(CASE WHEN balance_due > 0 THEN follow_up_date END) as follow_up_date
+        FROM orders WHERE deleted_at IS NULL GROUP BY customer_id
+      ) oa ON oa.customer_id = c.id
+      LEFT JOIN (
+        SELECT customer_id, SUM(amount) as total_order_payments FROM payments GROUP BY customer_id
+      ) pay ON pay.customer_id = c.id
+      LEFT JOIN (
+        SELECT customer_id, SUM(amount) as total_upi FROM upi_transactions
+        WHERE order_id IS NULL AND (notes NOT LIKE 'EXPENSE:%' OR notes IS NULL)
+        GROUP BY customer_id
+      ) upi ON upi.customer_id = c.id
+      LEFT JOIN (
+        SELECT customer_id, SUM(amount) as total_cheque_cleared FROM cheques WHERE status = 'cleared' GROUP BY customer_id
+      ) cheq ON cheq.customer_id = c.id
+      LEFT JOIN (
+        SELECT customer_id, SUM(amount) as total_cash_income FROM cash_income
+        WHERE (notes IS NULL OR notes NOT IN ('Order Advance Payment', 'Order Payment'))
+          AND (notes IS NULL OR notes NOT LIKE 'Cheque Cleared%')
+          AND (notes IS NULL OR notes NOT LIKE 'Galla Opening Balance%')
+        GROUP BY customer_id
+      ) cash ON cash.customer_id = c.id
+      LEFT JOIN (
+        SELECT customer_id, SUM(amount) as total_commission FROM expenses WHERE category = 'Commission' GROUP BY customer_id
+      ) comm ON comm.customer_id = c.id
+      WHERE c.deleted_at IS NULL
+    )
+    WHERE total_due > 0
     ORDER BY follow_up_date ASC, total_due DESC
   `, [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
