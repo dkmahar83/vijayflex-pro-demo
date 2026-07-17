@@ -470,6 +470,13 @@ db.serialize(() => {
   db.run(`ALTER TABLE expenses ADD COLUMN customer_id INTEGER DEFAULT NULL`, () => {})
   db.run(`ALTER TABLE expenses ADD COLUMN customer_name TEXT DEFAULT NULL`, () => {})
 
+  // Demo-copy fix: customers.js ka Commission-payments query expenses.created_at
+  // select karti hai, lekin ye column CREATE TABLE mein kabhi define nahi hua
+  // tha — production DB mein shayad manually add hua tha, is demo-database.js
+  // mein missing tha. Isi wajah se Customer Profile route har customer ke liye
+  // 500 (SQLITE_ERROR: no such column: created_at) de raha tha.
+  db.run(`ALTER TABLE expenses ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP`, () => {})
+
   // Order number system: VF-YYYY-NNNNNN
   db.run(`ALTER TABLE orders ADD COLUMN order_number TEXT DEFAULT NULL`, () => {})
 
