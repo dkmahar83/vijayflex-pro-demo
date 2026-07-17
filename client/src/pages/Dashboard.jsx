@@ -36,7 +36,11 @@ function Dashboard() {
   const [waMessage, setWaMessage] = useState('')
   const [waStatus, setWaStatus] = useState('checking')
   const [duesSearch, setDuesSearch] = useState('')
-  const [collapsed, setCollapsed] = useState({ stats: true, lowStock: true, todayOrders: true, dues: true })
+  // Summary Stats default-open — koi customer-specific data nahi hai isme
+  // (sirf counts/totals), isliye first-load pe khaali white-space nahi
+  // dikhega. Baaki 3 (Low Stock/Orders/Dues mein customer-naam, phone, wagera
+  // hote hain) collapsed-by-default hi rakhe hain — privacy ke liye.
+  const [collapsed, setCollapsed] = useState({ stats: false, lowStock: true, todayOrders: true, dues: false })
   // Hero panel — live clock, date, weather+location. Stats/Dues ka
   // collapsed-by-default privacy-behavior as-is hai.
   const [now, setNow] = useState(new Date())
@@ -45,8 +49,23 @@ function Dashboard() {
   const [weatherError, setWeatherError] = useState('')
   const navigate = useNavigate()
 
-  const toggleSection = (key) =>
-    setCollapsed(prev => ({ ...prev, [key]: !prev[key] }))
+  // Har card kis section-id ko scroll karega jab wo open ho
+  const SECTION_IDS = { stats: 'stats-section', lowStock: 'low-stock-section', todayOrders: 'today-orders-section', dues: 'dues-section' }
+
+  function toggleSection(key) {
+    setCollapsed(prev => {
+      const wasCollapsed = prev[key]
+      const next = { ...prev, [key]: !prev[key] }
+      // Sirf OPEN hote waqt scroll karo — close karte waqt nahi (warna page
+      // upar-neeche jump karega bina wajah).
+      if (wasCollapsed) {
+        setTimeout(() => {
+          document.getElementById(SECTION_IDS[key])?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }, 60)
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     getDashboard()
@@ -160,20 +179,11 @@ function Dashboard() {
           </div>
 
           <div style={styles.heroTimeRow}>
-            <div style={styles.timeTile}>
-              <span style={styles.timeTileLabel}>Hours</span>
-              <span style={styles.timeTileValue}>{istParts.hours}</span>
-            </div>
+            <span>{istParts.hours}</span>
             <span style={styles.heroColon}>:</span>
-            <div style={styles.timeTile}>
-              <span style={styles.timeTileLabel}>Minutes</span>
-              <span style={styles.timeTileValue}>{istParts.minutes}</span>
-            </div>
+            <span>{istParts.minutes}</span>
             <span style={styles.heroColon}>:</span>
-            <div style={styles.timeTile}>
-              <span style={styles.timeTileLabel}>Seconds</span>
-              <span style={styles.timeTileValue}>{istParts.seconds}</span>
-            </div>
+            <span>{istParts.seconds}</span>
           </div>
 
           {/* Day progress bar — 24-ghante ka visual, current time ka marker.
@@ -221,9 +231,14 @@ function Dashboard() {
               onClick={() => toggleSection('stats')}
               style={{ ...styles.navCard, ...(!collapsed.stats ? styles.navCardActive : {}) }}
             >
-              <BarChart3 size={18} />
-              <span style={styles.navCardLabel}>Summary Stats</span>
-              {!collapsed.stats ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <div style={styles.navCardTop}>
+                <div style={{ ...styles.navCardIconWrap, ...(!collapsed.stats ? styles.navCardIconWrapActive : {}) }}>
+                  <BarChart3 size={17} />
+                </div>
+                {!collapsed.stats ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+              </div>
+              <div style={styles.navCardLabel}>Summary Stats</div>
+              <div style={styles.navCardSub}>Full business overview</div>
             </button>
 
             {lowStockCount > 0 && (
@@ -231,9 +246,14 @@ function Dashboard() {
                 onClick={() => toggleSection('lowStock')}
                 style={{ ...styles.navCard, ...(!collapsed.lowStock ? styles.navCardActive : {}) }}
               >
-                <Package size={18} />
-                <span style={styles.navCardLabel}>Low Stock Alerts ({lowStockCount})</span>
-                {!collapsed.lowStock ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <div style={styles.navCardTop}>
+                  <div style={{ ...styles.navCardIconWrap, ...(!collapsed.lowStock ? styles.navCardIconWrapActive : {}) }}>
+                    <Package size={17} />
+                  </div>
+                  {!collapsed.lowStock ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                </div>
+                <div style={styles.navCardValue}>{lowStockCount}</div>
+                <div style={styles.navCardLabel}>Low Stock Alerts</div>
               </button>
             )}
 
@@ -241,9 +261,14 @@ function Dashboard() {
               onClick={() => toggleSection('todayOrders')}
               style={{ ...styles.navCard, ...(!collapsed.todayOrders ? styles.navCardActive : {}) }}
             >
-              <ClipboardList size={18} />
-              <span style={styles.navCardLabel}>Today's Orders ({data.today_orders_list.length})</span>
-              {!collapsed.todayOrders ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <div style={styles.navCardTop}>
+                <div style={{ ...styles.navCardIconWrap, ...(!collapsed.todayOrders ? styles.navCardIconWrapActive : {}) }}>
+                  <ClipboardList size={17} />
+                </div>
+                {!collapsed.todayOrders ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+              </div>
+              <div style={styles.navCardValue}>{data.today_orders_list.length}</div>
+              <div style={styles.navCardLabel}>Today's Orders</div>
             </button>
 
             <button
@@ -251,9 +276,14 @@ function Dashboard() {
               onClick={() => toggleSection('dues')}
               style={{ ...styles.navCard, ...(!collapsed.dues ? styles.navCardActive : {}) }}
             >
-              <Wallet size={18} />
-              <span style={styles.navCardLabel}>Due Payments ({allDues.length})</span>
-              {!collapsed.dues ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <div style={styles.navCardTop}>
+                <div style={{ ...styles.navCardIconWrap, ...(!collapsed.dues ? styles.navCardIconWrapActive : {}) }}>
+                  <Wallet size={17} />
+                </div>
+                {!collapsed.dues ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+              </div>
+              <div style={styles.navCardValue}>{allDues.length}</div>
+              <div style={styles.navCardLabel}>Due Payments</div>
             </button>
           </div>
         </div>
@@ -272,7 +302,7 @@ function Dashboard() {
 
       {/* ── SUMMARY STATS CONTENT ── */}
       {!collapsed.stats && (
-        <div style={styles.statsRow}>
+        <div style={styles.statsRow} id="stats-section">
           <div style={{ ...styles.card, borderLeft: '4px solid #3498db' }}>
             <div style={{ ...styles.cardIconCircle, backgroundColor: '#eaf4fd', color: '#3498db' }}>
               <ClipboardList size={18} />
@@ -368,7 +398,7 @@ function Dashboard() {
 
       {/* ── TODAY'S ORDERS CONTENT ── */}
       {!collapsed.todayOrders && (
-        <div style={styles.section}>
+        <div style={styles.section} id="today-orders-section">
           {data.today_orders_list.length === 0 ? (
             <p style={{ color: '#888' }}>No orders today yet.</p>
           ) : (
@@ -673,22 +703,12 @@ const styles = {
   liveDot: { width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#27ae60', marginLeft: '10px' },
   liveText: { color: '#27ae60', letterSpacing: '1px' },
   heroTimeRow: {
-    display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '14px',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', width: '100%',
+    fontSize: 'clamp(48px, 8.5vw, 130px)', fontWeight: '800', color: '#fff',
+    fontVariantNumeric: 'tabular-nums', lineHeight: 1, marginBottom: '22px',
+    fontFamily: "'Courier New', monospace", letterSpacing: '-2px',
   },
-  heroColon: { color: 'rgba(255,255,255,0.2)', fontSize: '28px', fontWeight: '700' },
-  timeTile: {
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
-    backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: '12px', padding: '8px 16px 10px', minWidth: '78px',
-  },
-  timeTileLabel: {
-    fontSize: '9px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase',
-    color: 'rgba(255,255,255,0.35)',
-  },
-  timeTileValue: {
-    fontSize: '46px', fontWeight: '800', color: '#fff', lineHeight: 1,
-    fontVariantNumeric: 'tabular-nums', fontFamily: "'Courier New', monospace",
-  },
+  heroColon: { color: 'rgba(255,255,255,0.25)', fontWeight: '700' },
   dayProgressWrap: { marginBottom: '18px' },
   dayProgressTrack: {
     position: 'relative', height: '5px', borderRadius: '3px',
@@ -718,19 +738,28 @@ const styles = {
   heroWeatherMuted: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'rgba(255,255,255,0.35)' },
   heroLocation: { display: 'flex', alignItems: 'center', gap: '3px', fontSize: '12px', color: '#7fd3ff', fontWeight: '500', paddingLeft: '8px', borderLeft: '1px solid rgba(255,255,255,0.2)', marginLeft: '2px' },
   navGrid: {
-    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-    gap: '10px',
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '12px',
   },
   navCard: {
-    display: 'flex', alignItems: 'center', gap: '10px',
+    display: 'flex', flexDirection: 'column', gap: '10px',
     backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: '10px', padding: '12px 14px', cursor: 'pointer',
+    borderRadius: '14px', padding: '16px 18px', cursor: 'pointer',
     color: 'rgba(255,255,255,0.85)', fontFamily: 'inherit', textAlign: 'left',
   },
   navCardActive: {
     backgroundColor: '#fff', color: '#1a1a2e', border: '1px solid #fff',
   },
-  navCardLabel: { flex: 1, fontSize: '13px', fontWeight: '600' },
+  navCardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  navCardIconWrap: {
+    width: '34px', height: '34px', borderRadius: '9px', display: 'flex',
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)', color: '#fff',
+  },
+  navCardIconWrapActive: { backgroundColor: '#1a1a2e', color: '#fff' },
+  navCardValue: { fontSize: '28px', fontWeight: '800', lineHeight: 1 },
+  navCardLabel: { fontSize: '13px', fontWeight: '600' },
+  navCardSub: { fontSize: '11px', opacity: 0.55, marginTop: '-4px' },
   heroRight: {
     flex: '0 1 240px', minWidth: '200px',
     background: 'linear-gradient(160deg, #e94560, #c81d4f)',
