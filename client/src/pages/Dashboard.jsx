@@ -139,6 +139,11 @@ function Dashboard() {
   const dayName   = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long' })
   const dateShort = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', year: 'numeric' })
 
+  // Din ka kitna hissa beet chuka hai (0–100%) — progress-bar marker ke liye
+  const dayProgressPct = (
+    (Number(istParts.hours) * 3600 + Number(istParts.minutes) * 60 + Number(istParts.seconds)) / 86400
+  ) * 100
+
   const lowStockCount = data.low_stock_alerts?.length || 0
 
   return (
@@ -155,11 +160,32 @@ function Dashboard() {
           </div>
 
           <div style={styles.heroTimeRow}>
-            <span>{istParts.hours}</span>
+            <div style={styles.timeTile}>
+              <span style={styles.timeTileLabel}>Hours</span>
+              <span style={styles.timeTileValue}>{istParts.hours}</span>
+            </div>
             <span style={styles.heroColon}>:</span>
-            <span>{istParts.minutes}</span>
+            <div style={styles.timeTile}>
+              <span style={styles.timeTileLabel}>Minutes</span>
+              <span style={styles.timeTileValue}>{istParts.minutes}</span>
+            </div>
             <span style={styles.heroColon}>:</span>
-            <span>{istParts.seconds}</span>
+            <div style={styles.timeTile}>
+              <span style={styles.timeTileLabel}>Seconds</span>
+              <span style={styles.timeTileValue}>{istParts.seconds}</span>
+            </div>
+          </div>
+
+          {/* Day progress bar — 24-ghante ka visual, current time ka marker.
+              References ke per-city mini time-sliders ka single-dashboard adaptation. */}
+          <div style={styles.dayProgressWrap}>
+            <div style={styles.dayProgressTrack}>
+              <div style={{ ...styles.dayProgressFill, width: `${dayProgressPct}%` }} />
+              <div style={{ ...styles.dayProgressDot, left: `${dayProgressPct}%` }} />
+            </div>
+            <div style={styles.dayProgressLabels}>
+              <span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>12 AM</span>
+            </div>
           </div>
 
           <div style={styles.heroDateRow}>
@@ -647,12 +673,40 @@ const styles = {
   liveDot: { width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#27ae60', marginLeft: '10px' },
   liveText: { color: '#27ae60', letterSpacing: '1px' },
   heroTimeRow: {
-    display: 'flex', alignItems: 'baseline',
-    fontSize: '58px', fontWeight: '800', color: '#fff',
-    fontVariantNumeric: 'tabular-nums', lineHeight: 1, marginBottom: '20px',
-    fontFamily: "'Courier New', monospace",
+    display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '14px',
   },
-  heroColon: { color: 'rgba(255,255,255,0.3)', margin: '0 4px' },
+  heroColon: { color: 'rgba(255,255,255,0.2)', fontSize: '28px', fontWeight: '700' },
+  timeTile: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+    backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '12px', padding: '8px 16px 10px', minWidth: '78px',
+  },
+  timeTileLabel: {
+    fontSize: '9px', fontWeight: '700', letterSpacing: '1.5px', textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.35)',
+  },
+  timeTileValue: {
+    fontSize: '46px', fontWeight: '800', color: '#fff', lineHeight: 1,
+    fontVariantNumeric: 'tabular-nums', fontFamily: "'Courier New', monospace",
+  },
+  dayProgressWrap: { marginBottom: '18px' },
+  dayProgressTrack: {
+    position: 'relative', height: '5px', borderRadius: '3px',
+    backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: '6px',
+  },
+  dayProgressFill: {
+    position: 'absolute', top: 0, left: 0, height: '100%', borderRadius: '3px',
+    background: 'linear-gradient(90deg, #27ae60, #7fd3ff)',
+  },
+  dayProgressDot: {
+    position: 'absolute', top: '50%', width: '10px', height: '10px', borderRadius: '50%',
+    backgroundColor: '#fff', transform: 'translate(-50%, -50%)',
+    boxShadow: '0 0 0 3px rgba(255,255,255,0.15)',
+  },
+  dayProgressLabels: {
+    display: 'flex', justifyContent: 'space-between', fontSize: '10px',
+    color: 'rgba(255,255,255,0.3)',
+  },
   heroDateRow: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
     flexWrap: 'wrap', gap: '14px', paddingBottom: '20px',
