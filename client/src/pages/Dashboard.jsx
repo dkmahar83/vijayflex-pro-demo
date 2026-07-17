@@ -1,3 +1,4 @@
+import '@fontsource/dseg7-classic/700.css'
 import { useState, useEffect } from 'react'
 import { getDashboard, sendBillWhatsApp, getWhatsAppStatus } from '../services/api'
 import { useNavigate } from 'react-router-dom'
@@ -27,6 +28,14 @@ import {
   Printer,
 } from 'lucide-react'
 
+// Clock ke liye seven-segment font — sirf hero-clock par use hota hai,
+// kahin aur typography nahi badalti. Font CDN se load hoti hai (koi local
+// file download nahi chahiye). Agar internet-free/offline build chahiye to
+// neeche note dekho.
+const DSEG7_FONT_ID  = 'vf-dseg7-font'
+const DSEG7_FONT_URL = 'https://cdn.jsdelivr.net/npm/@fontsource/dseg7-classic@5.2.5/700.css'
+const DSEG7_STACK    = "'DSEG7 Classic', 'Courier New', monospace"
+
 function Dashboard() {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
@@ -36,11 +45,7 @@ function Dashboard() {
   const [waMessage, setWaMessage] = useState('')
   const [waStatus, setWaStatus] = useState('checking')
   const [duesSearch, setDuesSearch] = useState('')
-  // Summary Stats default-open — koi customer-specific data nahi hai isme
-  // (sirf counts/totals), isliye first-load pe khaali white-space nahi
-  // dikhega. Baaki 3 (Low Stock/Orders/Dues mein customer-naam, phone, wagera
-  // hote hain) collapsed-by-default hi rakhe hain — privacy ke liye.
-  const [collapsed, setCollapsed] = useState({ stats: false, lowStock: true, todayOrders: true, dues: false })
+  const [collapsed, setCollapsed] = useState({ stats: true, lowStock: true, todayOrders: true, dues: true })
   // Hero panel — live clock, date, weather+location. Stats/Dues ka
   // collapsed-by-default privacy-behavior as-is hai.
   const [now, setNow] = useState(new Date())
@@ -52,20 +57,40 @@ function Dashboard() {
   // Har card kis section-id ko scroll karega jab wo open ho
   const SECTION_IDS = { stats: 'stats-section', lowStock: 'low-stock-section', todayOrders: 'today-orders-section', dues: 'dues-section' }
 
+  // Ek time par sirf EK section open — accordion behavior (reference ke
+  // "click card → scroll → expand, doosra band" wale spec ke mutabik).
+  function openSection(key) {
+    setCollapsed({ stats: true, lowStock: true, todayOrders: true, dues: true, [key]: false })
+    setTimeout(() => {
+      document.getElementById(SECTION_IDS[key])?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 60)
+  }
+
   function toggleSection(key) {
     setCollapsed(prev => {
-      const wasCollapsed = prev[key]
-      const next = { ...prev, [key]: !prev[key] }
-      // Sirf OPEN hote waqt scroll karo — close karte waqt nahi (warna page
-      // upar-neeche jump karega bina wajah).
-      if (wasCollapsed) {
+      if (prev[key]) {
+        // band tha → isko kholo, baaki sab band karo
         setTimeout(() => {
           document.getElementById(SECTION_IDS[key])?.scrollIntoView({ behavior: 'smooth', block: 'start' })
         }, 60)
+        return { stats: true, lowStock: true, todayOrders: true, dues: true, [key]: false }
       }
-      return next
+      // khula tha → sirf isko band karo
+      return { ...prev, [key]: true }
     })
   }
+
+  // Clock-font ko document head mein ek baar inject karo (CDN link).
+  // Duplicate-safe hai — agar pehle se present hai to dobara nahi daalega.
+  useEffect(() => {
+    if (!document.getElementById(DSEG7_FONT_ID)) {
+      const link = document.createElement('link')
+      link.id = DSEG7_FONT_ID
+      link.rel = 'stylesheet'
+      link.href = DSEG7_FONT_URL
+      document.head.appendChild(link)
+    }
+  }, [])
 
   useEffect(() => {
     getDashboard()
@@ -166,9 +191,35 @@ function Dashboard() {
   const lowStockCount = data.low_stock_alerts?.length || 0
 
   return (
-    <div>
-      {/* ── HERO PANEL — world-time-card style: big digital clock, date,
-          weather+location, aur ek branded photo-panel (right side). ── */}
+    <div style={styles.page}>
+      {/* Hover / fade-in animations — sirf yahi component ke liye scoped
+          (vf- prefix), baaki app ki styling se koi conflict nahi. */}
+      <style>{`
+        .vf-nav-card {
+          transition: transform .22s cubic-bezier(.4,0,.2,1), box-shadow .22s ease, border-color .22s ease;
+        }
+        .vf-nav-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 16px 30px rgba(0,0,0,0.28);
+          border-color: rgba(255,255,255,0.28);
+        }
+        .vf-nav-card-active:hover {
+          box-shadow: 0 16px 30px rgba(0,0,0,0.16);
+          border-color: rgba(233,69,96,0.35);
+        }
+        @keyframes vfFadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .vf-fade-in { animation: vfFadeIn .35s ease both; }
+        @media (prefers-reduced-motion: reduce) {
+          .vf-nav-card, .vf-fade-in { transition: none; animation: none; }
+        }
+      `}</style>
+
+      {/* ── HERO PANEL — world-time-card style: full-width dominant digital
+          clock, edge-to-edge timeline, date, weather+location, aur ek
+          branded photo-panel (right side). ── */}
       <div style={styles.hero}>
         <div style={styles.heroLeft}>
           <div style={styles.heroBrandRow}>
@@ -187,7 +238,7 @@ function Dashboard() {
           </div>
 
           {/* Day progress bar — 24-ghante ka visual, current time ka marker.
-              References ke per-city mini time-sliders ka single-dashboard adaptation. */}
+              Reference ke timeline-line ka single-dashboard adaptation, edge-to-edge. */}
           <div style={styles.dayProgressWrap}>
             <div style={styles.dayProgressTrack}>
               <div style={{ ...styles.dayProgressFill, width: `${dayProgressPct}%` }} />
@@ -224,11 +275,12 @@ function Dashboard() {
           </div>
 
           {/* NAV CARDS — Summary Stats / Low Stock / Today's Orders / Due Payments.
-              Amount kahin nahi dikhta yahan, sirf label + count. Jo section
-              expanded hai uska card dark-highlighted rahega. */}
+              Reference ke timezone-cards jaisa premium glass look. Click =
+              accordion open + smooth scroll; doosra khula ho to woh band ho jaata hai. */}
           <div style={styles.navGrid}>
             <button
               onClick={() => toggleSection('stats')}
+              className={`vf-nav-card ${!collapsed.stats ? 'vf-nav-card-active' : ''}`}
               style={{ ...styles.navCard, ...(!collapsed.stats ? styles.navCardActive : {}) }}
             >
               <div style={styles.navCardTop}>
@@ -244,6 +296,7 @@ function Dashboard() {
             {lowStockCount > 0 && (
               <button
                 onClick={() => toggleSection('lowStock')}
+                className={`vf-nav-card ${!collapsed.lowStock ? 'vf-nav-card-active' : ''}`}
                 style={{ ...styles.navCard, ...(!collapsed.lowStock ? styles.navCardActive : {}) }}
               >
                 <div style={styles.navCardTop}>
@@ -259,6 +312,7 @@ function Dashboard() {
 
             <button
               onClick={() => toggleSection('todayOrders')}
+              className={`vf-nav-card ${!collapsed.todayOrders ? 'vf-nav-card-active' : ''}`}
               style={{ ...styles.navCard, ...(!collapsed.todayOrders ? styles.navCardActive : {}) }}
             >
               <div style={styles.navCardTop}>
@@ -274,6 +328,7 @@ function Dashboard() {
             <button
               id="dues-nav-card"
               onClick={() => toggleSection('dues')}
+              className={`vf-nav-card ${!collapsed.dues ? 'vf-nav-card-active' : ''}`}
               style={{ ...styles.navCard, ...(!collapsed.dues ? styles.navCardActive : {}) }}
             >
               <div style={styles.navCardTop}>
@@ -302,7 +357,7 @@ function Dashboard() {
 
       {/* ── SUMMARY STATS CONTENT ── */}
       {!collapsed.stats && (
-        <div style={styles.statsRow} id="stats-section">
+        <div style={styles.statsRow} id="stats-section" className="vf-fade-in">
           <div style={{ ...styles.card, borderLeft: '4px solid #3498db' }}>
             <div style={{ ...styles.cardIconCircle, backgroundColor: '#eaf4fd', color: '#3498db' }}>
               <ClipboardList size={18} />
@@ -313,7 +368,7 @@ function Dashboard() {
 
           <div
             style={{ ...styles.card, borderLeft: '4px solid #e74c3c', cursor: 'pointer' }}
-            onClick={() => { setCollapsed(prev => ({ ...prev, dues: false })); document.getElementById('dues-section')?.scrollIntoView({ behavior: 'smooth' }) }}
+            onClick={() => openSection('dues')}
           >
             <div style={{ ...styles.cardIconCircle, backgroundColor: '#fdecea', color: '#e74c3c' }}>
               <Wallet size={18} />
@@ -342,7 +397,7 @@ function Dashboard() {
 
           <div
             style={{ ...styles.card, borderLeft: `4px solid ${lowStockCount > 0 ? '#e67e22' : '#27ae60'}`, cursor: 'pointer' }}
-            onClick={() => { setCollapsed(prev => ({ ...prev, lowStock: false })); document.getElementById('low-stock-section')?.scrollIntoView({ behavior: 'smooth' }) }}
+            onClick={() => openSection('lowStock')}
           >
             <div style={{ ...styles.cardIconCircle, backgroundColor: lowStockCount > 0 ? '#fdf2e9' : '#eafaf1', color: lowStockCount > 0 ? '#e67e22' : '#27ae60' }}>
               <Package size={18} />
@@ -357,7 +412,7 @@ function Dashboard() {
 
       {/* ── LOW STOCK ALERTS CONTENT ── */}
       {lowStockCount > 0 && !collapsed.lowStock && (
-        <div style={styles.section} id="low-stock-section">
+        <div style={styles.section} id="low-stock-section" className="vf-fade-in">
           <div style={styles.tableScroll}>
           <table style={styles.table}>
             <thead>
@@ -398,7 +453,7 @@ function Dashboard() {
 
       {/* ── TODAY'S ORDERS CONTENT ── */}
       {!collapsed.todayOrders && (
-        <div style={styles.section} id="today-orders-section">
+        <div style={styles.section} id="today-orders-section" className="vf-fade-in">
           {data.today_orders_list.length === 0 ? (
             <p style={{ color: '#888' }}>No orders today yet.</p>
           ) : (
@@ -446,7 +501,7 @@ function Dashboard() {
 
       {/* ── DUE PAYMENTS CONTENT ── */}
       {!collapsed.dues && (
-        <div style={styles.section} id="dues-section">
+        <div style={styles.section} id="dues-section" className="vf-fade-in">
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
             <input
               type="text"
@@ -686,32 +741,40 @@ function statusColor(status) {
 }
 
 const styles = {
+  // Poora page apni parent-scroll ke andar available height fill kare —
+  // neeche khali white/blank patti na bache. Apne actual top-navbar/outer
+  // padding ke hisaab se "64px" ko adjust kar lena (0 bhi kar sakte ho
+  // agar koi top navbar nahi hai).
+  page: { minHeight: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column' },
+
   // ── HERO ──
   hero: {
-    display: 'flex', gap: '28px', flexWrap: 'wrap',
+    display: 'flex', gap: '32px', flexWrap: 'wrap',
     background: 'linear-gradient(135deg, #1a1a2e, #23233f)',
-    borderRadius: '20px', padding: '28px 32px',
+    borderRadius: '24px', padding: '40px 44px',
     boxShadow: '0 10px 32px rgba(26,26,46,0.22)',
     marginBottom: '28px',
   },
-  heroLeft: { flex: '1 1 420px', display: 'flex', flexDirection: 'column' },
+  heroLeft: { flex: '1 1 460px', display: 'flex', flexDirection: 'column' },
   heroBrandRow: {
     display: 'flex', alignItems: 'center', gap: '8px',
     fontSize: '12px', fontWeight: '700', letterSpacing: '1.2px',
-    color: 'rgba(255,255,255,0.55)', marginBottom: '18px',
+    color: 'rgba(255,255,255,0.55)', marginBottom: '22px',
   },
   liveDot: { width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#27ae60', marginLeft: '10px' },
   liveText: { color: '#27ae60', letterSpacing: '1px' },
+  // Clock — reference jaisa full-width, dominant, seven-segment look.
+  // Yehi ek jagah hai jahan typography badli hai (DSEG7 Classic Bold).
   heroTimeRow: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', width: '100%',
-    fontSize: 'clamp(48px, 8.5vw, 130px)', fontWeight: '800', color: '#fff',
-    fontVariantNumeric: 'tabular-nums', lineHeight: 1, marginBottom: '22px',
-    fontFamily: "'Courier New', monospace", letterSpacing: '-2px',
+    fontSize: 'clamp(46px, 9.5vw, 160px)', fontWeight: '700', color: '#fff',
+    fontVariantNumeric: 'tabular-nums', lineHeight: 1, marginBottom: '26px',
+    fontFamily: DSEG7_STACK, letterSpacing: '0.01em',
   },
-  heroColon: { color: 'rgba(255,255,255,0.25)', fontWeight: '700' },
-  dayProgressWrap: { marginBottom: '18px' },
+  heroColon: { color: 'rgba(255,255,255,0.28)', fontWeight: '700' },
+  dayProgressWrap: { marginBottom: '20px' },
   dayProgressTrack: {
-    position: 'relative', height: '5px', borderRadius: '3px',
+    position: 'relative', height: '6px', borderRadius: '3px',
     backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: '6px',
   },
   dayProgressFill: {
@@ -719,9 +782,9 @@ const styles = {
     background: 'linear-gradient(90deg, #27ae60, #7fd3ff)',
   },
   dayProgressDot: {
-    position: 'absolute', top: '50%', width: '10px', height: '10px', borderRadius: '50%',
+    position: 'absolute', top: '50%', width: '12px', height: '12px', borderRadius: '50%',
     backgroundColor: '#fff', transform: 'translate(-50%, -50%)',
-    boxShadow: '0 0 0 3px rgba(255,255,255,0.15)',
+    boxShadow: '0 0 0 4px rgba(255,255,255,0.15)',
   },
   dayProgressLabels: {
     display: 'flex', justifyContent: 'space-between', fontSize: '10px',
@@ -729,8 +792,8 @@ const styles = {
   },
   heroDateRow: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
-    flexWrap: 'wrap', gap: '14px', paddingBottom: '20px',
-    borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '18px',
+    flexWrap: 'wrap', gap: '14px', paddingBottom: '24px',
+    borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '22px',
   },
   heroDay:  { fontSize: '19px', fontWeight: '700', color: '#fff' },
   heroDate: { fontSize: '13px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' },
@@ -739,16 +802,18 @@ const styles = {
   heroLocation: { display: 'flex', alignItems: 'center', gap: '3px', fontSize: '12px', color: '#7fd3ff', fontWeight: '500', paddingLeft: '8px', borderLeft: '1px solid rgba(255,255,255,0.2)', marginLeft: '2px' },
   navGrid: {
     display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '12px',
+    gap: '14px',
   },
+  // Premium glass cards — reference ke timezone-cards jaisa.
   navCard: {
     display: 'flex', flexDirection: 'column', gap: '10px',
-    backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: '14px', padding: '16px 18px', cursor: 'pointer',
+    backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: '18px', padding: '18px 20px', cursor: 'pointer',
     color: 'rgba(255,255,255,0.85)', fontFamily: 'inherit', textAlign: 'left',
+    backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
   },
   navCardActive: {
-    backgroundColor: '#fff', color: '#1a1a2e', border: '1px solid #fff',
+    backgroundColor: 'rgba(255,255,255,0.96)', color: '#1a1a2e', border: '1px solid rgba(255,255,255,0.9)',
   },
   navCardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   navCardIconWrap: {
@@ -763,11 +828,11 @@ const styles = {
   heroRight: {
     flex: '0 1 240px', minWidth: '200px',
     background: 'linear-gradient(160deg, #e94560, #c81d4f)',
-    borderRadius: '16px', padding: '24px',
+    borderRadius: '20px', padding: '24px',
     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
     textAlign: 'center', gap: '6px',
   },
-  heroPhotoImg: { width: '100%', height: '100%', objectFit: 'cover', borderRadius: '16px' },
+  heroPhotoImg: { width: '100%', height: '100%', objectFit: 'cover', borderRadius: '20px' },
   heroPhotoIconWrap: {
     width: '56px', height: '56px', borderRadius: '50%',
     backgroundColor: 'rgba(255,255,255,0.18)', display: 'flex',
