@@ -1,4 +1,3 @@
-import '@fontsource/dseg7-classic/700.css'
 import { useState, useEffect } from 'react'
 import { getDashboard, sendBillWhatsApp, getWhatsAppStatus } from '../services/api'
 import { useNavigate } from 'react-router-dom'
@@ -30,8 +29,7 @@ import {
 
 // Clock ke liye seven-segment font — sirf hero-clock par use hota hai,
 // kahin aur typography nahi badalti. Font CDN se load hoti hai (koi local
-// file download nahi chahiye). Agar internet-free/offline build chahiye to
-// neeche note dekho.
+// file download nahi chahiye, koi bundler-resolve bhi nahi chahiye).
 const DSEG7_FONT_ID  = 'vf-dseg7-font'
 const DSEG7_FONT_URL = 'https://cdn.jsdelivr.net/npm/@fontsource/dseg7-classic@5.2.5/700.css'
 const DSEG7_STACK    = "'DSEG7 Classic', 'Courier New', monospace"
