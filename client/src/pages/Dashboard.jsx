@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getDashboard, sendBillWhatsApp } from '../services/api'
+import { getDashboard, sendBillWhatsApp, getWhatsAppStatus } from '../services/api'
 import { useNavigate } from 'react-router-dom'
 import SectionLoader from '../components/SectionLoader'
 import {
@@ -34,6 +34,7 @@ function Dashboard() {
   const [waSendModal, setWaSendModal] = useState(null)
   const [selectedUpiForWA, setSelectedUpiForWA] = useState('')
   const [waMessage, setWaMessage] = useState('')
+  const [waStatus, setWaStatus] = useState('checking')
   const [duesSearch, setDuesSearch] = useState('')
   const [collapsed, setCollapsed] = useState({ stats: true, lowStock: true, todayOrders: true, dues: true })
   // Hero panel — live clock, date, weather+location. Stats/Dues ka
@@ -51,6 +52,12 @@ function Dashboard() {
     getDashboard()
       .then(res => { setData(res.data); setLoading(false) })
       .catch(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    getWhatsAppStatus()
+      .then(res => setWaStatus(res.data.status))
+      .catch(() => {})
   }, [])
 
   // WA-status message ab khud 4 sec baad gayab ho jaata hai — pehle sirf
@@ -484,7 +491,9 @@ function Dashboard() {
                             <button
                               onClick={e => {
                                 e.stopPropagation()
-                                setWaMessage('Due Payments ab customer-wise hai — single-order WA reminder yahan se abhi nahi bhej sakte. "Send Statement on WhatsApp" (Customer Profile se) use karo.')
+                                setWaMessage(waStatus === 'disabled'
+                                  ? 'WhatsApp is Disabled in Demo due to security reasons.'
+                                  : 'Due Payments ab customer-wise hai — single-order WA reminder yahan se abhi nahi bhej sakte. "Send Statement on WhatsApp" (Customer Profile se) use karo.')
                               }}
                               style={{
                                 backgroundColor: '#f5f5f5', color: '#aaa', border: '1px solid #ddd',
@@ -492,7 +501,7 @@ function Dashboard() {
                                 fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px',
                                 flexShrink: 0
                               }}
-                              title="Filhaal is naye customer-wise view se single-order reminder possible nahi"
+                              title={waStatus === 'disabled' ? 'Disabled in Demo due to security reasons' : 'Filhaal is naye customer-wise view se single-order reminder possible nahi'}
                             >
                               <Smartphone size={12} /> WA
                             </button>
@@ -563,10 +572,10 @@ function Dashboard() {
             >
               <option value="">❌ QR mat bhejo</option>
               {[
-                { label: 'BOI Shop Account', upiId: 'boism-9950580621@boi' },
-                { label: 'Google Pay - Rampratap Painter', upiId: 'gpay-11263065173@okbizaxis' },
-                { label: 'PhonePe - Bhavya Printers', upiId: 'q214575569@ybl' },
-                { label: 'Amazon Pay - Deepak', upiId: '7073580621@yapl' }
+                { label: 'Demo UPI Account 1', upiId: 'demo1@upi' },
+                { label: 'Demo UPI Account 2', upiId: 'demo2@upi' },
+                { label: 'Demo UPI Account 3', upiId: 'demo3@upi' },
+                { label: 'Demo UPI Account 4', upiId: 'demo4@upi' }
               ].map(acc => (
                 <option key={acc.upiId} value={acc.upiId}>{acc.label}</option>
               ))}

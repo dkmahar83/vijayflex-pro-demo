@@ -8,12 +8,21 @@ let clientReady = false
 let clientStatus = 'disconnected' // 'disconnected' | 'qr_pending' | 'ready'
 let lastQR = null
 
+// Demo-deployment safety switch — jab true ho, WhatsApp client kabhi
+// initialize nahi hota aur koi bhi send-attempt turant clear error deta hai.
+// Isse frontend ko bhi ek explicit 'disabled' status milta hai, misleading
+// "initializing..."/"connecting..." dikhne ke bajaye.
+const DEMO_DISABLED = process.env.DISABLE_WHATSAPP === 'true'
+
 function getClient() {
   return client
 }
 
 function getStatus() {
-  return { status: clientStatus, ready: clientReady }
+  if (DEMO_DISABLED) {
+    return { status: 'disabled', ready: false, disabled: true }
+  }
+  return { status: clientStatus, ready: clientReady, disabled: false }
 }
 
 function getLastQR() {
@@ -44,6 +53,17 @@ function clearSessionAndReinit(oldClient) {
 }
 
 function initWhatsApp() {
+  // Defense-in-depth — index.js already skip karta hai is function ka call
+  // jab DISABLE_WHATSAPP=true ho, lekin agar kabhi kahi aur se (galti se)
+  // ye call ho jaye, yahan bhi hard-stop hai. Puppeteer/Chromium demo ke
+  // Render environment mein available nahi hota, isliye ye kabhi try bhi
+  // nahi hona chahiye.
+  if (DEMO_DISABLED) {
+    console.log('WhatsApp init skipped (DISABLE_WHATSAPP=true)')
+    clientStatus = 'disabled'
+    return
+  }
+
   if (client) {
     console.log('WhatsApp already initialized, skipping.')
     return
@@ -128,6 +148,9 @@ function initWhatsApp() {
 }
 
 async function sendBillToCustomer({ phone, customerName, orderId, totalAmount, advancePaid, balanceDue, pdfBuffer, upiId }) {
+  if (DEMO_DISABLED) {
+    throw new Error('Disabled in Demo due to security reasons')
+  }
   if (!clientReady || !client) {
     throw new Error('WhatsApp not connected. Please scan QR code first.')
   }

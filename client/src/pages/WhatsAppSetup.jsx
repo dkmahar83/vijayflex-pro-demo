@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getWhatsAppStatus, getWhatsAppQR } from '../services/api'
-import { Smartphone, CheckCircle2, Clock, XCircle } from 'lucide-react'
+import { Smartphone, CheckCircle2, Clock, XCircle, Lock } from 'lucide-react'
 
 function WhatsAppSetup() {
   const [status, setStatus] = useState('checking')
   const [qr, setQr] = useState(null)
+  const intervalRef = useRef(null)
+
   function checkStatus() {
     getWhatsAppStatus()
       .then(res => {
@@ -15,14 +17,21 @@ function WhatsAppSetup() {
         } else {
           setQr(null)
         }
+        // Demo mein WhatsApp permanently disabled hai — status kabhi badlega
+        // nahi, isliye har 3 sec polling karte rehna faltu hai. Ek baar
+        // 'disabled' confirm hote hi interval band kar dete hain.
+        if (res.data.status === 'disabled' && intervalRef.current) {
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+        }
       })
       .catch(() => setStatus('error'))
   }
 
   useEffect(() => {
     checkStatus()
-    const interval = setInterval(checkStatus, 3000) // check every 3 seconds
-    return () => clearInterval(interval)
+    intervalRef.current = setInterval(checkStatus, 3000) // check every 3 seconds
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [])
 
   
@@ -36,26 +45,32 @@ function WhatsAppSetup() {
         padding: '16px 20px',
         borderRadius: '8px',
         marginBottom: '24px',
-        backgroundColor: status === 'ready' ? '#f0fff4' : status === 'qr_pending' ? '#fff9e6' : '#f8f8f8',
-        border: `1px solid ${status === 'ready' ? '#27ae60' : status === 'qr_pending' ? '#f39c12' : '#ddd'}`
+        backgroundColor: status === 'ready' ? '#f0fff4' : status === 'qr_pending' ? '#fff9e6' : status === 'disabled' ? '#f5f5f5' : '#f8f8f8',
+        border: `1px solid ${status === 'ready' ? '#27ae60' : status === 'qr_pending' ? '#f39c12' : status === 'disabled' ? '#ccc' : '#ddd'}`
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{
             width: '12px', height: '12px', borderRadius: '50%',
-            backgroundColor: status === 'ready' ? '#27ae60' : status === 'qr_pending' ? '#f39c12' : '#ccc'
+            backgroundColor: status === 'ready' ? '#27ae60' : status === 'qr_pending' ? '#f39c12' : status === 'disabled' ? '#999' : '#ccc'
           }} />
-          <strong style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <strong style={{ display: 'flex', alignItems: 'center', gap: '6px', color: status === 'disabled' ? '#777' : 'inherit' }}>
             {status === 'ready' ? <><CheckCircle2 size={15} /> WhatsApp Connected — Ready to send bills</>
               : status === 'qr_pending' ? <><Clock size={15} /> Scan QR Code to connect</>
               : status === 'initializing' ? <><Clock size={15} /> Starting WhatsApp...</>
               : status === 'authenticated' ? <><Clock size={15} /> Authenticating...</>
               : status === 'checking' ? <><Clock size={15} /> Checking WhatsApp status...</>
+              : status === 'disabled' ? <><Lock size={15} /> WhatsApp Disabled in Demo due to security reasons</>
               : <><XCircle size={15} /> WhatsApp Disconnected</>}
           </strong>
         </div>
         {status === 'ready' && (
           <p style={{ fontSize: '13px', color: '#888', marginTop: '8px', marginLeft: '22px' }}>
             You can now send bills directly from the Orders page using the <Smartphone size={12} style={{ verticalAlign: 'middle' }} /> WA button.
+          </p>
+        )}
+        {status === 'disabled' && (
+          <p style={{ fontSize: '13px', color: '#999', marginTop: '8px', marginLeft: '22px' }}>
+            Security reasons ki wajah se demo version mein WhatsApp integration disable rakha gaya hai.
           </p>
         )}
       </div>
@@ -95,6 +110,18 @@ function WhatsAppSetup() {
           <p style={{ color: '#888' }}>
             WhatsApp is initializing. Please wait a moment and the QR code will appear.
             Make sure the server is running.
+          </p>
+        </div>
+      )}
+
+      {status === 'disabled' && (
+        <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '10px', color: '#aaa' }}>
+            <Lock size={32} />
+          </div>
+          <p style={{ color: '#888', fontSize: '14px' }}>
+            Ye ek demo/preview environment hai — real customer WhatsApp numbers par
+            messages na jaayein isliye ye feature yahan permanently disable kiya gaya hai.
           </p>
         </div>
       )}

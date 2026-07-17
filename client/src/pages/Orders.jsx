@@ -1033,6 +1033,7 @@ function Orders() {
                     </LoadingButton>
                     <button
                       onClick={() => {
+                        if (waStatus === 'disabled') return setMessage('WhatsApp is Disabled in Demo due to security reasons.')
                         if (!o.phone) return setMessage('Customer has no phone number.')
                         setSelectedUpiForWA('')
                         setWaSendModal(o)
@@ -1048,7 +1049,7 @@ function Orders() {
                         marginLeft: '6px',
                         display: 'inline-flex', alignItems: 'center', gap: '4px'
                       }}
-                      title={waStatus === 'ready' ? 'Send bill on WhatsApp' : 'WhatsApp not connected'}
+                      title={waStatus === 'disabled' ? 'Disabled in Demo due to security reasons' : waStatus === 'ready' ? 'Send bill on WhatsApp' : 'WhatsApp not connected'}
                     >
                       <Smartphone size={12} /> WA
                     </button>

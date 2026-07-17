@@ -13,6 +13,9 @@ router.get('/status', (req, res) => {
 
 // GET /api/whatsapp/qr
 router.get('/qr', (req, res) => {
+  if (process.env.DISABLE_WHATSAPP === 'true') {
+    return res.json({ qr: null, disabled: true, message: 'Disabled in Demo due to security reasons' })
+  }
   const qr = getLastQR()
   if (!qr) return res.json({ qr: null, message: 'No QR pending or already connected' })
   res.json({ qr })
@@ -20,6 +23,12 @@ router.get('/qr', (req, res) => {
 
 // POST /api/whatsapp/send-bill/:orderId
 router.post('/send-bill/:orderId', async (req, res) => {
+  // Demo-safety guard — koi bhi PDF-fetch/WhatsApp-call try karne se pehle
+  // hi block, taaki galti se koi partial-attempt bhi na ho.
+  if (process.env.DISABLE_WHATSAPP === 'true') {
+    return res.status(403).json({ error: 'Disabled in Demo due to security reasons', disabled: true })
+  }
+
   const { orderId } = req.params
 
   try {
@@ -173,6 +182,10 @@ function buildPDF(doc, order, items, payments) {
 
 // POST /api/whatsapp/send-statement/:customerId
 router.post('/send-statement/:customerId', async (req, res) => {
+  if (process.env.DISABLE_WHATSAPP === 'true') {
+    return res.status(403).json({ error: 'Disabled in Demo due to security reasons', disabled: true })
+  }
+
   const { customerId } = req.params
 
   db.get(`SELECT * FROM customers WHERE id = ? AND deleted_at IS NULL`, [customerId], async (err, customer) => {

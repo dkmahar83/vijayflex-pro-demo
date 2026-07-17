@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getCustomerProfile, addOpeningBalance, uploadCustomerPhoto, deleteCustomerPhoto, generateCustomerStatement, sendStatementWhatsApp } from '../services/api'
+import { getCustomerProfile, addOpeningBalance, uploadCustomerPhoto, deleteCustomerPhoto, generateCustomerStatement, sendStatementWhatsApp, getWhatsAppStatus } from '../services/api'
 import PageLock from '../components/PageLock'
 import SectionLoader from '../components/SectionLoader'
 import {
@@ -40,12 +40,20 @@ function CustomerProfile() {
   const [waStmtSending, setWaStmtSending] = useState(false)
   const [stmtMsg, setStmtMsg]             = useState('')
   const [stmtSuccess, setStmtSuccess]     = useState(false)
+  // WhatsApp status — demo mein hamesha 'disabled' aayega backend se
+  const [waStatus, setWaStatus] = useState('checking')
 
   useEffect(() => {
     getCustomerProfile(id)
       .then(res => { setCustomer(res.data); setLoading(false) })
       .catch(() => setLoading(false))
   }, [id])
+
+  useEffect(() => {
+    getWhatsAppStatus()
+      .then(res => setWaStatus(res.data.status))
+      .catch(() => {})
+  }, [])
 
   // Teeno independent messages (opening-balance, photo, statement) ab khud
   // 4 sec baad gayab ho jaate hain — pehle sirf click-karke hatao tha.
@@ -404,8 +412,19 @@ function handlePhotoRemove() {
           {stmtLoading ? 'Generating...' : <><FileText size={15} /> Download Statement</>}
         </button>
         <button
-          onClick={() => setWaStmtModal(true)}
-          style={{ backgroundColor: '#fff', color: '#1a1a2e', border: '1px solid #1a1a2e', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+          onClick={() => {
+            if (waStatus === 'disabled') return setStmtMsg('WhatsApp is Disabled in Demo due to security reasons.')
+            setWaStmtModal(true)
+          }}
+          style={{
+            backgroundColor: waStatus === 'disabled' ? '#f5f5f5' : '#fff',
+            color: waStatus === 'disabled' ? '#aaa' : '#1a1a2e',
+            border: waStatus === 'disabled' ? '1px solid #ddd' : '1px solid #1a1a2e',
+            padding: '10px 20px', borderRadius: '8px',
+            cursor: waStatus === 'disabled' ? 'not-allowed' : 'pointer',
+            fontSize: '14px', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '8px'
+          }}
+          title={waStatus === 'disabled' ? 'Disabled in Demo due to security reasons' : 'Send statement on WhatsApp'}
         >
           <Send size={15} /> Send Statement on WhatsApp
         </button>
@@ -653,10 +672,10 @@ function handlePhotoRemove() {
                 <select value={waStmtUpi} onChange={e => setWaStmtUpi(e.target.value)}
                   style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', marginBottom: '16px', boxSizing: 'border-box' }}>
                   <option value=''>Select UPI Account</option>
-                  <option value='boism-9950580621@boi'>BOI Shop Account</option>
-                  <option value='gpay-11263065173@okbizaxis'>Google Pay - Rampratap Painter</option>
-                  <option value='q214575569@ybl'>PhonePe - Bhavya Printers</option>
-                  <option value='7073580621@yapl'>Amazon Pay - Deepak</option>
+                  <option value='demo1@upi'>Demo UPI Account 1</option>
+                  <option value='demo2@upi'>Demo UPI Account 2</option>
+                  <option value='demo3@upi'>Demo UPI Account 3</option>
+                  <option value='demo4@upi'>Demo UPI Account 4</option>
                 </select>
               </>
             )}
