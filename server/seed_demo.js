@@ -24,6 +24,11 @@ function fmtDateTime(d) {
 function daysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return d; }
 function daysFromNow(n) { const d = new Date(); d.setDate(d.getDate() + n); return d; }
 
+// ── RANDOMIZATION HELPERS — har seed run pe alag dummy data ──
+function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function randFloat(min, max) { return Math.random() * (max - min) + min; }
+function weightedMode(cashProb = 0.8) { return Math.random() < cashProb ? 'cash' : 'upi'; }
+
 async function seedDemoData() {
   if (process.env.SEED_DEMO_DATA !== 'true') return;
 
@@ -37,14 +42,19 @@ async function seedDemoData() {
     logger.info('Seeding demo data...');
     const year = new Date().getFullYear();
 
+    // Tracks total CASH actually collected (advance-cash + extra-cash-payments +
+    // cash_income) so we can size expenses safely below this and never let the
+    // Cash Drawer go negative.
+    let totalCashCollected = 0;
+
     // ── CUSTOMERS ──
     const customersData = [
       { key: 'sharma', firm_name: 'Sharma Traders', contact_name: 'Ramesh Sharma', phone: '9876543210' },
       { key: 'patel', firm_name: 'Patel General Store', contact_name: 'Kishore Patel', phone: '9823456701' },
-      { key: 'gupta', firm_name: 'Gupta Enterprises', contact_name: 'Anil Gupta', phone: '9812345678', opening_balance: 2000, opening_balance_date: fmtDate(daysAgo(60)), opening_balance_notes: 'Pichle saal ka bakaya' },
+      { key: 'gupta', firm_name: 'Gupta Enterprises', contact_name: 'Anil Gupta', phone: '9812345678', opening_balance: randInt(1000, 3000), opening_balance_date: fmtDate(daysAgo(60)), opening_balance_notes: 'Pichle saal ka bakaya' },
       { key: 'verma', firm_name: 'Verma Print Solutions', contact_name: 'Suresh Verma', phone: '9898989898' },
       { key: 'singh', firm_name: 'Singh Hardware', contact_name: 'Jaswinder Singh', phone: '9765432109' },
-      { key: 'mehta', firm_name: 'Mehta Stationery', contact_name: 'Priya Mehta', phone: '9654321098', opening_balance: 500, opening_balance_date: fmtDate(daysAgo(45)), opening_balance_notes: 'Pichle saal ka bakaya' },
+      { key: 'mehta', firm_name: 'Mehta Stationery', contact_name: 'Priya Mehta', phone: '9654321098', opening_balance: randInt(300, 800), opening_balance_date: fmtDate(daysAgo(45)), opening_balance_notes: 'Pichle saal ka bakaya' },
     ];
     const cid = {};
     for (const c of customersData) {
@@ -69,10 +79,11 @@ async function seedDemoData() {
       );
       eid[e.key] = r.lastID;
     }
-    // Attendance — last 5 days, mostly present
+    // Attendance — last 5 days, randomly ek-do absent
     for (const key of Object.keys(eid)) {
+      const absentDay = randInt(0, 6); // kabhi kabhi koi absent day hi nahi (6 = out of range)
       for (let i = 0; i < 5; i++) {
-        const status = (key === 'sunita' && i === 2) ? 'absent' : 'present';
+        const status = (i === absentDay) ? 'absent' : 'present';
         await runAsync(
           `INSERT OR IGNORE INTO attendance (employee_id, date, status) VALUES (?, ?, ?)`,
           [eid[key], fmtDate(daysAgo(i)), status]
@@ -94,11 +105,18 @@ async function seedDemoData() {
       );
       vid[v.key] = r.lastID;
     }
+    // Vendor amounts thoda randomize — ye "outgoing to vendor" hai, shop ke apne
+    // cash drawer ko directly touch nahi karta (jab tak expense na ho), isliye safe hai
+    const bansalPurchase = randInt(4000, 6500);
+    const bansalPaid = Math.round(bansalPurchase * randFloat(0.5, 0.75));
+    const cityChemPurchase = randInt(900, 1600);
+    const nationalPurchase = randInt(1800, 3200);
+
     const vendorTxns = [
-      { key: 'bansal', type: 'purchase', amount: 5000, description: 'Flex rolls 500GSM x10', date: daysAgo(10) },
-      { key: 'bansal', type: 'payment', amount: 3000, description: 'Partial payment', payment_method: 'cash', date: daysAgo(8) },
-      { key: 'city_chem', type: 'purchase', amount: 1200, description: 'Solvent + cleaning chemicals', date: daysAgo(6) },
-      { key: 'national', type: 'purchase', amount: 2500, description: 'Photo frames bulk order', date: daysAgo(4) },
+      { key: 'bansal', type: 'purchase', amount: bansalPurchase, description: 'Flex rolls 500GSM x10', date: daysAgo(10) },
+      { key: 'bansal', type: 'payment', amount: bansalPaid, description: 'Partial payment', payment_method: 'cash', date: daysAgo(8) },
+      { key: 'city_chem', type: 'purchase', amount: cityChemPurchase, description: 'Solvent + cleaning chemicals', date: daysAgo(6) },
+      { key: 'national', type: 'purchase', amount: nationalPurchase, description: 'Photo frames bulk order', date: daysAgo(4) },
     ];
     for (const t of vendorTxns) {
       await runAsync(
@@ -106,11 +124,33 @@ async function seedDemoData() {
         [vid[t.key], t.type, t.amount, fmtDate(t.date), t.description, t.payment_method || null, fmtDateTime(t.date)]
       );
     }
-    await runAsync(`UPDATE vendors SET total_purchased = 5000, total_paid = 3000, balance_due = 2000 WHERE id = ?`, [vid.bansal]);
-    await runAsync(`UPDATE vendors SET total_purchased = 1200, total_paid = 0, balance_due = 1200 WHERE id = ?`, [vid.city_chem]);
-    await runAsync(`UPDATE vendors SET total_purchased = 2500, total_paid = 0, balance_due = 2500 WHERE id = ?`, [vid.national]);
+    await runAsync(`UPDATE vendors SET total_purchased = ?, total_paid = ?, balance_due = ? WHERE id = ?`, [bansalPurchase, bansalPaid, bansalPurchase - bansalPaid, vid.bansal]);
+    await runAsync(`UPDATE vendors SET total_purchased = ?, total_paid = 0, balance_due = ? WHERE id = ?`, [cityChemPurchase, cityChemPurchase, vid.city_chem]);
+    await runAsync(`UPDATE vendors SET total_purchased = ?, total_paid = 0, balance_due = ? WHERE id = ?`, [nationalPurchase, nationalPurchase, vid.national]);
 
-    // ── ORDERS (with items + payments) ──
+    // ── ORDERS (with items + payments + PROPERLY LINKED advance) ──
+    async function insertAdvanceRecord(customerKey, orderId, amount, mode, date) {
+      const dateStr = fmtDate(date);
+      const dateTimeStr = fmtDateTime(date);
+      if (mode === 'upi') {
+        const r = await runAsync(
+          `INSERT INTO upi_transactions (upi_account, customer_name, customer_id, order_id, amount, transaction_date, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'Order Advance Payment', ?)`,
+          ['Demo UPI Account 1', customersData.find(x => x.key === customerKey).firm_name, cid[customerKey], orderId, amount, dateStr, dateTimeStr]
+        );
+        return { table: 'upi_transactions', id: r.lastID };
+      } else {
+        // cash advance — isko cash_income mein daalna zaroori hai warna
+        // Cash Drawer isko "cash in" nahi maanega, jabki expenses "cash out" ban jaate hain
+        const r = await runAsync(
+          `INSERT INTO cash_income (customer_id, amount, income_date, notes, payment_mode, created_at) VALUES (?, ?, ?, 'Order Advance Payment', 'cash', ?)`,
+          [cid[customerKey], amount, dateStr, dateTimeStr]
+        );
+        totalCashCollected += amount;
+        return { table: 'cash_income', id: r.lastID };
+      }
+    }
+
     async function makeOrder({ customerKey, description, status, items, advancePaid, advancePaymentMode, discountAmount, discountNote, followUpDays, createdDaysAgo, orderNum, extraPayments }) {
       const total = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
       const balanceDue = total - advancePaid - (discountAmount || 0) - (extraPayments || []).reduce((s, p) => s + p.amount, 0);
@@ -130,64 +170,82 @@ async function seedDemoData() {
           [orderId, it.item_name, it.quantity, it.unit_price, it.quantity * it.unit_price]
         );
       }
+      // Advance ko properly link karo (cash_income/upi_transactions + orders.advance_entry_*)
+      if (advancePaid > 0) {
+        const adv = await insertAdvanceRecord(customerKey, orderId, advancePaid, advancePaymentMode, created);
+        await runAsync(`UPDATE orders SET advance_entry_table = ?, advance_entry_id = ? WHERE id = ?`, [adv.table, adv.id, orderId]);
+      }
       for (const p of (extraPayments || [])) {
         await runAsync(
           `INSERT INTO payments (order_id, customer_id, amount, payment_date, note, payment_mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [orderId, cid[customerKey], p.amount, fmtDate(p.date), p.note || null, p.mode || 'cash', fmtDateTime(p.date)]
         );
+        if ((p.mode || 'cash') === 'cash') totalCashCollected += p.amount;
       }
       return orderId;
     }
 
-    await makeOrder({
-      customerKey: 'sharma', description: 'Shop banner flex', status: 'in_progress',
-      items: [{ item_name: 'Flex 180GSM banner', quantity: 40, unit_price: 25 }, { item_name: 'Eyelets', quantity: 20, unit_price: 5 }],
-      advancePaid: 500, advancePaymentMode: 'cash', followUpDays: 3, createdDaysAgo: 5, orderNum: `VF-${year}-000001`
-    });
-    await makeOrder({
-      customerKey: 'sharma', description: 'Visiting cards', status: 'delivered',
-      items: [{ item_name: 'Visiting Card Printing', quantity: 500, unit_price: 2 }],
-      advancePaid: 1000, advancePaymentMode: 'cash', createdDaysAgo: 15, orderNum: `VF-${year}-000002`
-    });
-    await makeOrder({
-      customerKey: 'patel', description: 'Shop Signboard', status: 'ready',
-      items: [{ item_name: 'Flex 300GSM', quantity: 60, unit_price: 30 }, { item_name: 'Frame + Fitting', quantity: 1, unit_price: 500 }],
-      advancePaid: 1000, advancePaymentMode: 'cash', followUpDays: 2, createdDaysAgo: 7, orderNum: `VF-${year}-000003`,
-      extraPayments: [{ amount: 800, date: daysAgo(3), note: 'Part payment', mode: 'cash' }]
-    });
-    await makeOrder({
-      customerKey: 'gupta', description: 'Wedding card printing', status: 'pending',
-      items: [{ item_name: 'Wedding Card', quantity: 200, unit_price: 15 }],
-      advancePaid: 0, advancePaymentMode: null, followUpDays: 1, createdDaysAgo: 2, orderNum: `VF-${year}-000004`
-    });
-    await makeOrder({
-      customerKey: 'verma', description: 'Office stamp + letterhead', status: 'delivered',
-      items: [{ item_name: 'Rubber Stamp', quantity: 2, unit_price: 150 }, { item_name: 'Letterhead Printing', quantity: 100, unit_price: 3 }],
-      advancePaid: 600, advancePaymentMode: 'upi', createdDaysAgo: 10, orderNum: `VF-${year}-000005`
-    });
-    await makeOrder({
-      customerKey: 'singh', description: 'Hoarding flex 20x10', status: 'in_progress',
-      items: [{ item_name: 'Flex 500GSM', quantity: 200, unit_price: 35 }],
-      advancePaid: 3000, advancePaymentMode: 'cash', followUpDays: 5, createdDaysAgo: 4, orderNum: `VF-${year}-000006`,
-      extraPayments: [{ amount: 2000, date: daysAgo(1), note: 'Part payment', mode: 'cash' }]
-    });
-    await makeOrder({
-      customerKey: 'mehta', description: 'Notebook printing', status: 'pending',
-      items: [{ item_name: 'Custom Notebook', quantity: 100, unit_price: 40 }],
-      advancePaid: 1500, advancePaymentMode: 'cash', followUpDays: 0, createdDaysAgo: 3, orderNum: `VF-${year}-000007`
-    });
-    await makeOrder({
-      customerKey: 'sharma', description: 'Diwali offer banner', status: 'delivered',
-      items: [{ item_name: 'Flex 200GSM', quantity: 30, unit_price: 28 }],
-      advancePaid: 0, advancePaymentMode: null, discountAmount: 40, discountNote: 'Round-off',
-      followUpDays: -2, createdDaysAgo: 12, orderNum: `VF-${year}-000008`
-    });
+    // Har order ke liye base template — quantity/advance % har run randomize hote hain
+    const orderTemplates = [
+      { customerKey: 'sharma', description: 'Shop banner flex', status: 'in_progress',
+        items: [{ item_name: 'Flex 180GSM banner', qtyRange: [30, 50], unit_price: 25 }, { item_name: 'Eyelets', qtyRange: [15, 25], unit_price: 5 }],
+        followUpDays: randInt(1, 4), createdDaysAgo: randInt(3, 7) },
+      { customerKey: 'sharma', description: 'Visiting cards', status: 'delivered',
+        items: [{ item_name: 'Visiting Card Printing', qtyRange: [400, 600], unit_price: 2 }],
+        createdDaysAgo: randInt(10, 18) },
+      { customerKey: 'patel', description: 'Shop Signboard', status: 'ready',
+        items: [{ item_name: 'Flex 300GSM', qtyRange: [50, 70], unit_price: 30 }, { item_name: 'Frame + Fitting', qtyRange: [1, 1], unit_price: 500 }],
+        followUpDays: randInt(1, 3), createdDaysAgo: randInt(5, 9),
+        extra: true },
+      { customerKey: 'gupta', description: 'Wedding card printing', status: 'pending',
+        items: [{ item_name: 'Wedding Card', qtyRange: [150, 250], unit_price: 15 }],
+        advanceOverride: 0, followUpDays: randInt(0, 2), createdDaysAgo: randInt(1, 3) },
+      { customerKey: 'verma', description: 'Office stamp + letterhead', status: 'delivered',
+        items: [{ item_name: 'Rubber Stamp', qtyRange: [2, 3], unit_price: 150 }, { item_name: 'Letterhead Printing', qtyRange: [80, 120], unit_price: 3 }],
+        createdDaysAgo: randInt(8, 12), modeOverride: 'upi' },
+      { customerKey: 'singh', description: 'Hoarding flex 20x10', status: 'in_progress',
+        items: [{ item_name: 'Flex 500GSM', qtyRange: [150, 220], unit_price: 35 }],
+        followUpDays: randInt(3, 6), createdDaysAgo: randInt(3, 6), extra: true },
+      { customerKey: 'mehta', description: 'Notebook printing', status: 'pending',
+        items: [{ item_name: 'Custom Notebook', qtyRange: [80, 120], unit_price: 40 }],
+        followUpDays: randInt(-1, 1), createdDaysAgo: randInt(2, 4) },
+      { customerKey: 'sharma', description: 'Diwali offer banner', status: 'delivered',
+        items: [{ item_name: 'Flex 200GSM', qtyRange: [25, 35], unit_price: 28 }],
+        advanceOverride: 0, discountAmount: randInt(20, 60), discountNote: 'Round-off',
+        followUpDays: randInt(-4, -1), createdDaysAgo: randInt(10, 14) },
+    ];
+
+    let orderCounter = 1;
+    for (const t of orderTemplates) {
+      const items = t.items.map(i => ({ item_name: i.item_name, quantity: randInt(i.qtyRange[0], i.qtyRange[1]), unit_price: i.unit_price }));
+      const total = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
+      const advancePaid = t.advanceOverride !== undefined ? t.advanceOverride : Math.round(total * randFloat(0.3, 0.65));
+      const advancePaymentMode = advancePaid > 0 ? (t.modeOverride || weightedMode(0.8)) : null;
+
+      const extraPayments = [];
+      if (t.extra) {
+        const remaining = total - advancePaid - (t.discountAmount || 0);
+        const extraAmt = Math.round(remaining * randFloat(0.4, 0.8));
+        if (extraAmt > 0) {
+          extraPayments.push({ amount: extraAmt, date: daysAgo(randInt(1, Math.max(1, t.createdDaysAgo - 1))), note: 'Part payment', mode: weightedMode(0.85) });
+        }
+      }
+
+      await makeOrder({
+        customerKey: t.customerKey, description: t.description, status: t.status, items,
+        advancePaid, advancePaymentMode,
+        discountAmount: t.discountAmount, discountNote: t.discountNote,
+        followUpDays: t.followUpDays, createdDaysAgo: t.createdDaysAgo,
+        orderNum: `VF-${year}-${String(orderCounter++).padStart(6, '0')}`,
+        extraPayments
+      });
+    }
 
     // ── CHEQUES ──
     const cheques = [
-      { customerKey: 'patel', cheque_number: '445521', bank_name: 'SBI', amount: 1500, status: 'cleared', date: daysAgo(9) },
-      { customerKey: 'singh', cheque_number: '778890', bank_name: 'PNB', amount: 2500, status: 'received', date: daysAgo(2) },
-      { customerKey: 'gupta', cheque_number: '112233', bank_name: 'HDFC', amount: 800, status: 'bounced', date: daysAgo(15) },
+      { customerKey: 'patel', cheque_number: '445521', bank_name: 'SBI', amount: randInt(1200, 1800), status: 'cleared', date: daysAgo(9) },
+      { customerKey: 'singh', cheque_number: '778890', bank_name: 'PNB', amount: randInt(2000, 3000), status: 'received', date: daysAgo(2) },
+      { customerKey: 'gupta', cheque_number: '112233', bank_name: 'HDFC', amount: randInt(600, 1000), status: 'bounced', date: daysAgo(15) },
     ];
     for (const c of cheques) {
       await runAsync(
@@ -196,10 +254,10 @@ async function seedDemoData() {
       );
     }
 
-    // ── UPI TRANSACTIONS (standalone) ──
+    // ── UPI TRANSACTIONS (standalone, non-order) ──
     const upiTxns = [
-      { customerKey: 'gupta', upi_account: 'Demo UPI Account 1', amount: 250, date: daysAgo(6) },
-      { customerKey: null, upi_account: 'Demo UPI Account 2', customer_name: 'Walk-in Customer', amount: 180, date: daysAgo(3) },
+      { customerKey: 'gupta', upi_account: 'Demo UPI Account 1', amount: randInt(150, 350), date: daysAgo(6) },
+      { customerKey: null, upi_account: 'Demo UPI Account 2', customer_name: 'Walk-in Customer', amount: randInt(100, 250), date: daysAgo(3) },
     ];
     for (const u of upiTxns) {
       await runAsync(
@@ -208,62 +266,68 @@ async function seedDemoData() {
       );
     }
 
-    // ── CASH INCOME (standalone) ──
+    // ── CASH INCOME (standalone, non-order) ──
     const cashIncomes = [
-      { customerKey: 'mehta', amount: 300, notes: 'Extra material sale', mode: 'cash', date: daysAgo(4) },
-      { customerKey: 'verma', amount: 150, notes: 'Misc income', mode: 'cash', date: daysAgo(2) },
+      { customerKey: 'mehta', amount: randInt(200, 450), notes: 'Extra material sale', mode: 'cash', date: daysAgo(4) },
+      { customerKey: 'verma', amount: randInt(100, 250), notes: 'Misc income', mode: 'cash', date: daysAgo(2) },
     ];
     for (const ci of cashIncomes) {
       await runAsync(
         `INSERT INTO cash_income (customer_id, amount, income_date, notes, payment_mode, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
         [cid[ci.customerKey], ci.amount, fmtDate(ci.date), ci.notes, ci.mode, fmtDateTime(ci.date)]
       );
+      if (ci.mode === 'cash') totalCashCollected += ci.amount;
     }
 
     // ── EXPENSES ──
-    const expenses = [
-      { category: 'Rent', amount: 8000, description: 'Shop rent - monthly', date: daysAgo(20) },
-      { category: 'Electricity Bill', amount: 1500, description: null, date: daysAgo(15) },
-      { category: 'Chai Pani', amount: 100, description: null, date: daysAgo(1) },
-      { category: 'Commission', amount: 500, description: 'Commission wapas', customerKey: 'sharma', date: daysAgo(5) },
-      { category: 'Fuel/Transport', amount: 300, description: null, date: daysAgo(3) },
+    // IMPORTANT: expenses ka total budget ab totalCashCollected ke ek safe
+    // fraction (55%-75%) tak hi capped hai — isliye Cash Drawer ka
+    // closing balance kabhi bhi negative NAHI jaayega, chahe upar ke
+    // randomized amounts kuch bhi bane hon.
+    const expenseBudget = Math.max(2000, Math.round(totalCashCollected * randFloat(0.55, 0.75)));
+    const expenseTemplates = [
+      { category: 'Rent', weight: 0.45, description: 'Shop rent - monthly', date: daysAgo(20) },
+      { category: 'Electricity Bill', weight: 0.18, description: null, date: daysAgo(15) },
+      { category: 'Chai Pani', weight: 0.03, description: null, date: daysAgo(randInt(1, 3)) },
+      { category: 'Commission', weight: 0.12, description: 'Commission wapas', customerKey: 'sharma', date: daysAgo(5) },
+      { category: 'Fuel/Transport', weight: 0.07, description: null, date: daysAgo(3) },
+      { category: 'Misc/Stationery', weight: 0.05, description: 'Shop supplies', date: daysAgo(randInt(6, 12)) },
     ];
-    for (const ex of expenses) {
+    const weightSum = expenseTemplates.reduce((s, e) => s + e.weight, 0);
+    for (const ex of expenseTemplates) {
+      const amount = Math.max(50, Math.round(expenseBudget * (ex.weight / weightSum) * randFloat(0.8, 1.15)));
       await runAsync(
         `INSERT INTO expenses (category, amount, expense_date, description, payment_mode, customer_id, customer_name) VALUES (?, ?, ?, ?, 'cash', ?, ?)`,
-        [ex.category, ex.amount, fmtDate(ex.date), ex.description,
+        [ex.category, amount, fmtDate(ex.date), ex.description,
          ex.customerKey ? cid[ex.customerKey] : null,
          ex.customerKey ? customersData.find(x => x.key === ex.customerKey).firm_name : null]
       );
     }
 
-    // ── INVENTORY ──
-    await runAsync(`INSERT INTO inventory_flex (brand, size_ft, quantity, unit) VALUES ('Flex King', 8, 12, 'roll')`);
-    await runAsync(`INSERT INTO inventory_flex (brand, size_ft, quantity, unit) VALUES ('Flex King', 10, 3, 'roll')`);
+    // ── INVENTORY ── (quantities randomize taaki low-stock warnings bhi kabhi kabhi trigger ho)
+    await runAsync(`INSERT INTO inventory_flex (brand, size_ft, quantity, unit) VALUES ('Flex King', 8, ?, 'roll')`, [randInt(8, 15)]);
+    await runAsync(`INSERT INTO inventory_flex (brand, size_ft, quantity, unit) VALUES ('Flex King', 10, ?, 'roll')`, [randInt(1, 5)]);
     await runAsync(`INSERT INTO inventory_flex (brand, size_ft, quantity, unit) VALUES ('SuperPrint', 6, 0, 'roll')`);
 
-    await runAsync(`INSERT INTO inventory_stamps (stamp_type, size, design_type, quantity) VALUES ('Self-Inking', 'Small', 'Round', 15)`);
-    await runAsync(`INSERT INTO inventory_stamps (stamp_type, size, design_type, quantity) VALUES ('Rubber', 'Medium', 'Rectangle', 2)`);
+    await runAsync(`INSERT INTO inventory_stamps (stamp_type, size, design_type, quantity) VALUES ('Self-Inking', 'Small', 'Round', ?)`, [randInt(10, 20)]);
+    await runAsync(`INSERT INTO inventory_stamps (stamp_type, size, design_type, quantity) VALUES ('Rubber', 'Medium', 'Rectangle', ?)`, [randInt(1, 4)]);
 
-    await runAsync(`INSERT INTO inventory_chemicals (chemical_name, quantity, unit, minimum_stock) VALUES ('Solvent Ink Cleaner', 8, 'litre', 5)`);
-    await runAsync(`INSERT INTO inventory_chemicals (chemical_name, quantity, unit, minimum_stock) VALUES ('Lamination Solution', 1, 'litre', 3)`);
+    await runAsync(`INSERT INTO inventory_chemicals (chemical_name, quantity, unit, minimum_stock) VALUES ('Solvent Ink Cleaner', ?, 'litre', 5)`, [randInt(5, 10)]);
+    await runAsync(`INSERT INTO inventory_chemicals (chemical_name, quantity, unit, minimum_stock) VALUES ('Lamination Solution', ?, 'litre', 3)`, [randInt(1, 3)]);
 
-    await runAsync(`INSERT INTO inventory_frames (frame_type, size, design, quantity) VALUES ('Wooden', '12x18', 'Classic', 10)`);
+    await runAsync(`INSERT INTO inventory_frames (frame_type, size, design, quantity) VALUES ('Wooden', '12x18', 'Classic', ?)`, [randInt(6, 14)]);
     await runAsync(`INSERT INTO inventory_frames (frame_type, size, design, quantity) VALUES ('Plastic', '8x10', 'Modern', 0)`);
 
-    await runAsync(`INSERT INTO inventory_ink (item_name, item_type, quantity, unit, minimum_level) VALUES ('Cyan Ink', 'ink', 4, 'litre', 2)`);
-    await runAsync(`INSERT INTO inventory_ink (item_name, item_type, quantity, unit, minimum_level) VALUES ('Black Solvent', 'solvent', 1, 'litre', 2)`);
+    await runAsync(`INSERT INTO inventory_ink (item_name, item_type, quantity, unit, minimum_level) VALUES ('Cyan Ink', 'ink', ?, 'litre', 2)`, [randInt(2, 6)]);
+    await runAsync(`INSERT INTO inventory_ink (item_name, item_type, quantity, unit, minimum_level) VALUES ('Black Solvent', 'solvent', ?, 'litre', 2)`, [randInt(1, 3)]);
 
     // ── SETTINGS ──
-    // Note-wise Cash Tracking demo mein OFF rakh raha hoon (default) — taaki
-    // pehli baar demo explore karne wale ko amount-fields locked na milein.
-    // Toggle karke woh khud dekh sakte hain feature kaise kaam karta hai.
     await runAsync(
       `INSERT INTO app_settings (key, value) VALUES ('note_tracking_enabled', 'false')
        ON CONFLICT(key) DO UPDATE SET value = 'false'`
     );
 
-    logger.info('✅ Demo data seeded successfully — 6 customers, 8 orders, 3 employees, 3 vendors, inventory, cheques, expenses.');
+    logger.info(`✅ Demo data seeded successfully — cash collected ~₹${totalCashCollected}, expense budget ~₹${expenseBudget}.`);
   } catch (err) {
     logger.error('Demo seed failed: ' + err.message);
   }

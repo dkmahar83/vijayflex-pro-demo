@@ -5,7 +5,7 @@ if (process.env.NODE_ENV === 'production') {
   process.exit(1);
 }
 if (process.argv[2] !== '--confirm') {
-  console.error('⚠️  Ye SAAB payments, expenses, cash income, UPI transactions, cheques, opening balances PERMANENTLY delete kar dega, aur order/vendor balances reset kar dega.');
+  console.error('⚠️  Ye SAAB payments, expenses, cash income, UPI transactions, cheques, orders, customers, employees, vendors, inventory PERMANENTLY delete kar dega.');
   console.error('    Confirm karne ke liye phir se chalao: node reset_data.js --confirm');
   process.exit(1);
 }
@@ -48,37 +48,32 @@ async function main() {
     // ke baad bhi purani baseline-count se hi calculate hoti rahegi.
     await step('cash_drawer_baseline cleared', `DELETE FROM cash_drawer_baseline`);
 
-    // Orders reset — discount_amount ab formula mein shamil hai (jaisa
-    // recalculateOrderBalance karta hai: total_amount - advance_paid -
-    // discount_amount - paid). Pehle balance_due = total_amount set hota
-    // tha, discount ignore ho jaata tha — agar order pe discount tha to
-    // reset ke baad due galat (zyada) dikhta.
-    // advance_denomination_breakdown bhi NULL kiya — warna Denomination
-    // Drawer calculation purane note-counts ko "phantom cash" ki tarah
-    // dobara add kar deti (wo check nahi karti ki advance_paid abhi > 0
-    // hai ya nahi, bas column ka data hone pe apply kar deti hai).
-    // advance_entry_table/id/mode bhi clear kiye — ab wo dangling
-    // references the (deleted rows ko point kar rahe the).
-    await step('orders reset (balance_due = total_amount - discount_amount)', `
-      UPDATE orders SET
-        advance_paid = 0,
-        advance_payment_mode = NULL,
-        advance_entry_table = NULL,
-        advance_entry_id = NULL,
-        advance_denomination_breakdown = NULL,
-        balance_due = total_amount - COALESCE(discount_amount, 0)
-    `);
+    // NAYA: master data bhi clear karo — warna seed_demo.js ka
+    // "orders already exist → skip" check hamesha true rahega, aur
+    // reset ke baad bhi purana hi data dikhta rahega (naya random
+    // dummy data kabhi generate hi nahi hoga). Ye 3 purane steps
+    // (orders UPDATE, vendors UPDATE, customers UPDATE) replace karte
+    // hain — ab rows update nahi, delete hoti hain taaki seed_demo.js
+    // fresh row-count 0 dekhe aur naya randomized data bana sake.
+    await step('order_items cleared',    `DELETE FROM order_items`);
+    await step('orders cleared',         `DELETE FROM orders`);
+    await step('attendance cleared',     `DELETE FROM attendance`);
+    await step('customers cleared',      `DELETE FROM customers`);
+    await step('employees cleared',      `DELETE FROM employees`);
+    await step('vendors cleared',        `DELETE FROM vendors`);
+    await step('inventory_flex cleared',      `DELETE FROM inventory_flex`);
+    await step('inventory_stamps cleared',    `DELETE FROM inventory_stamps`);
+    await step('inventory_chemicals cleared', `DELETE FROM inventory_chemicals`);
+    await step('inventory_frames cleared',    `DELETE FROM inventory_frames`);
+    await step('inventory_ink cleared',       `DELETE FROM inventory_ink`);
 
-    // Vendor balances reset
-    await step('vendor balances reset', `UPDATE vendors SET total_paid = 0, balance_due = 0, total_purchased = 0`);
-
-    // NAYA: customers.opening_balance bhi reset — ye bhi utna hi
-    // "financial data" hai jitna payments/cash_income (Stage 1/2 mein
-    // add hua tha). Warna reset ke baad bhi purana opening-balance number
-    // Customer Profile/Dashboard/Reports mein reh jaata, jabki baaki sab 0
-    // dikh raha hota — inconsistent state.
-    await step('customer opening balances reset', `
-      UPDATE customers SET opening_balance = 0, opening_balance_date = NULL, opening_balance_notes = NULL
+    // Autoincrement counters bhi reset — taaki naye IDs 1 se shuru hon
+    await step('id counters reset', `
+      DELETE FROM sqlite_sequence WHERE name IN (
+        'orders','order_items','customers','employees','vendors',
+        'attendance','inventory_flex','inventory_stamps',
+        'inventory_chemicals','inventory_frames','inventory_ink'
+      )
     `);
 
     await runAsync('COMMIT');
@@ -87,7 +82,7 @@ async function main() {
     throw err;
   }
 
-  console.log('\n🎉 All financial data cleared successfully!');
+  console.log('\n🎉 All data cleared successfully! Restart the server to seed fresh demo data.');
   process.exit(0);
 }
 
