@@ -330,3 +330,8 @@
     at node:net:2274:7
     at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
 2026-08-03 15:57:57 [INFO]: Connected to SQLite database.
+2026-08-03 15:58:22 [INFO]: All tables created successfully.
+2026-08-03 15:58:23 [INFO]: Server running on http://localhost:5000
+2026-08-03 15:58:23 [INFO]: WhatsApp init skipped (DISABLE_WHATSAPP=true)
+2026-08-03 15:58:23 [INFO]: Connected to SQLite database.
+2026-08-03 15:58:25 [INFO]: Demo seed skipped — orders already exist.
