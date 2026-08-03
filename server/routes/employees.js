@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const fs = require('fs');
+const path = require('path');
+const { uploadEmployee } = require('../middleware/upload');
+const { getLiveCashBalance } = require('../utils/cashBalance');
 
 // ─────────────────────────────────────────
 // HELPER: IST timestamp (consistent with orders.js)
@@ -279,32 +283,49 @@ router.post('/generate-salary', (req, res) => {
         // Use IST date, not UTC
         const today = nowIST().split(' ')[0];
 
-        db.run(`
-          INSERT INTO employee_salary_credits
-            (employee_id, month, year, salary_amount, credited_date, notes, payment_mode, upi_account, denomination_breakdown)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          employee_id, month, year, calculatedSalary, today,
-          notes || `${month}/${year} salary`,
-          payment_mode || 'cash', upi_account || null, breakdownToSave
-        ], function(err) {
-          if (err) return res.status(500).json({ error: err.message });
-
+        function insertSalaryRows() {
           db.run(`
-            INSERT INTO expenses
-              (category, amount, expense_date, description, paid_to_type, paid_to_id,
-               payment_mode, upi_account, created_at)
+            INSERT INTO employee_salary_credits
+              (employee_id, month, year, salary_amount, credited_date, notes, payment_mode, upi_account, denomination_breakdown)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           `, [
-            'Employee Salary', calculatedSalary, today,
-            `${employee.name} salary (${month}/${year})`,
-            'employee', employee_id,
-            payment_mode || 'cash', upi_account || null, createdAt
-          ], (err) => {
+            employee_id, month, year, calculatedSalary, today,
+            notes || `${month}/${year} salary`,
+            payment_mode || 'cash', upi_account || null, breakdownToSave
+          ], function(err) {
             if (err) return res.status(500).json({ error: err.message });
-            res.json({ message: 'Salary generated successfully', salary_amount: calculatedSalary });
+
+            db.run(`
+              INSERT INTO expenses
+                (category, amount, expense_date, description, paid_to_type, paid_to_id,
+                 payment_mode, upi_account, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+              'Employee Salary', calculatedSalary, today,
+              `${employee.name} salary (${month}/${year})`,
+              'employee', employee_id,
+              payment_mode || 'cash', upi_account || null, createdAt
+            ], (err) => {
+              if (err) return res.status(500).json({ error: err.message });
+              res.json({ message: 'Salary generated successfully', salary_amount: calculatedSalary });
+            });
           });
-        });
+        }
+
+        // Cash salary se pehle live galla balance check
+        if ((payment_mode || 'cash') === 'cash') {
+          getLiveCashBalance((err, balance) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (calculatedSalary > balance) {
+              return res.status(400).json({
+                error: `Galla mein sirf ₹${balance} cash hai — ₹${calculatedSalary} ki salary cash mein nahi de sakte (₹${(calculatedSalary - balance).toFixed(0)} kam hai).`
+              });
+            }
+            insertSalaryRows();
+          });
+        } else {
+          insertSalaryRows();
+        }
       });
     });
   });
@@ -360,6 +381,59 @@ router.delete('/:id', (req, res) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ message: `${employee.name} aur unka saara data delete ho gaya.` });
       });
+    });
+  });
+});
+
+// ─────────────────────────────────────────
+// POST /api/employees/:id/photo
+// ─────────────────────────────────────────
+router.post('/:id/photo', uploadEmployee.single('photo'), (req, res) => {
+  const { id } = req.params;
+
+  if (!req.file) {
+    return res.status(400).json({ error: 'No photo file received' });
+  }
+
+  db.get(`SELECT photo_path FROM employees WHERE id = ?`, [id], (err, employee) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!employee) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+
+    const newPhotoPath = `uploads/employees/${req.file.filename}`;
+
+    db.run(`UPDATE employees SET photo_path = ? WHERE id = ?`, [newPhotoPath, id], function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+
+      if (employee.photo_path) {
+        const oldFullPath = path.join(__dirname, '..', employee.photo_path);
+        fs.unlink(oldFullPath, () => {});
+      }
+
+      res.json({ message: 'Photo uploaded successfully', photo_path: newPhotoPath });
+    });
+  });
+});
+
+// ─────────────────────────────────────────
+// DELETE /api/employees/:id/photo
+// ─────────────────────────────────────────
+router.delete('/:id/photo', (req, res) => {
+  const { id } = req.params;
+
+  db.get(`SELECT photo_path FROM employees WHERE id = ?`, [id], (err, employee) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!employee) return res.status(404).json({ error: 'Employee not found' });
+    if (!employee.photo_path) return res.status(400).json({ error: 'No photo to delete' });
+
+    const fullPath = path.join(__dirname, '..', employee.photo_path);
+
+    db.run(`UPDATE employees SET photo_path = NULL WHERE id = ?`, [id], function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      fs.unlink(fullPath, () => {});
+      res.json({ message: 'Photo removed successfully' });
     });
   });
 });

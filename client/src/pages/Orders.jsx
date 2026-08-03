@@ -1,8 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import api, { getOrders, getCustomers, createOrder, updateOrderStatus, getOrderDetail, addPayment, deleteOrder, sendBillWhatsApp, generatePDF, getOrderPhotos, uploadOrderPhoto, deleteOrderPhoto, getSetting, getDenominationDrawer } from '../services/api'
 import DenominationCounter from '../components/DenominationCounter'
 import LoadingButton from '../components/LoadingButton'
 import SectionLoader from '../components/SectionLoader'
+import PageHeader from '../components/ui/PageHeader'
+import Card from '../components/ui/Card'
+import Badge from '../components/ui/Badge'
+import Modal from '../components/ui/Modal'
+import { PrimaryButton, SecondaryButton, IconButton } from '../components/ui/Button'
+import { Table, THead, Th, TBody, Tr, Td } from '../components/ui/Table'
+import StatusDropdown from '../components/ui/StatusDropdown'
 import {
   Ruler,
   X,
@@ -26,6 +33,8 @@ import {
   CheckCircle2,
   Send,
   ListFilter,
+  Plus,
+  Trash2,
 } from 'lucide-react'
 
 const UPI_ACCOUNTS = [
@@ -34,6 +43,37 @@ const UPI_ACCOUNTS = [
   'Demo UPI Account 3',
   'Demo UPI Account 4'
 ]
+
+// Reusable Cash / UPI / Cheque mode-picker used for both the advance-payment
+// field (New Order form) and the record-payment field (order detail). Same
+// small pill-button pattern used for Dashboard's due-filter buttons.
+function PaymentModeButtons({ value, onChange, options }) {
+  const ICONS = { cash: Banknote, upi: Smartphone, cheque: Receipt }
+  const LABELS = { cash: 'Cash', upi: 'UPI', cheque: 'Cheque' }
+  return (
+    <div className="flex gap-2">
+      {options.map(mode => {
+        const Icon = ICONS[mode]
+        const active = value === mode
+        return (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => onChange(mode)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all ${
+              active ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" /> {LABELS[mode]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+const inputClasses = 'bg-slate-800/80 border border-slate-700/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 px-3.5 py-2.5 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/80 w-full min-w-0 disabled:opacity-50 disabled:cursor-not-allowed'
+const labelClasses = 'text-[11px] font-semibold text-slate-400 block mb-1.5'
 
 function Orders() {
   const [orders, setOrders] = useState([])
@@ -70,20 +110,20 @@ function Orders() {
   const [selectedUpiForWA, setSelectedUpiForWA] = useState('')
   const [advanceDenomination, setAdvanceDenomination] = useState({})
   const [paymentDenomination, setPaymentDenomination] = useState({})
-  // Note-wise Cash Tracking — global setting (Galla Hisaab tab wali hi key).
-  // Default true jab tak fetch nahi hoti, taaki tracking-ON shops ke liye
-  // field galti se ek pal ke liye bhi unlocked na dikhe.
+  // Note-wise cash tracking — global setting (same key as the Cash Drawer tab).
+  // Defaults to true until fetched, so tracking-ON shops never see the field
+  // briefly unlocked before the real setting loads.
   const [noteTrackingEnabled, setNoteTrackingEnabled] = useState(true)
-  // Live drawer notes — "Change Returned" ko available notes se zyada nahi badhne dena
+  // Live drawer notes — keeps "amount received" from exceeding what's actually in the drawer
   const [availableNotes, setAvailableNotes] = useState(null)
-  // Search+Filter ab single-row hain — status filter ab dropdown-menu se select hota hai
+  // Search + filter are a single row now — status filter is picked from a dropdown menu
   const [showFilterMenu, setShowFilterMenu] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [paymentSubmitting, setPaymentSubmitting] = useState(false)
   const [downloadingBillId, setDownloadingBillId] = useState(null)
   const [waSending, setWaSending] = useState(false)
-  // Order-create ka customer field — pehle plain <select> tha, ab daily-sales
-  // "Record Other Payment" jaisa search-as-you-type + filtered dropdown.
+  // New-order customer field — used to be a plain <select>, now a search-as-you-type
+  // + filtered dropdown, matching the "Record Other Payment" pattern in Daily Sales.
   const [customerSearchQuery, setCustomerSearchQuery] = useState('')
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
 
@@ -126,8 +166,8 @@ function Orders() {
     getCustomers().then(res => setCustomers(res.data))
   }, [filterStatus]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Message ab khud 4 sec baad gayab ho jaata hai — pehle sirf click-karke
-  // hatao tha, isliye purana "Order created" wagaira screen pe atka rehta tha.
+  // Message now auto-clears after 4s — previously required a manual click to
+  // dismiss, so a stale "Order created" toast could sit on screen indefinitely.
   useEffect(() => {
     if (!message) return
     const timer = setTimeout(() => setMessage(''), 4000)
@@ -198,9 +238,9 @@ function Orders() {
 
   function openEditForm(order) {
     setEditingOrder(order)
-    // order list-query pehle se firm_name/contact_name JOIN karke deti hai (jaisa
-    // table row mein use hota hai), isliye customers array load hone ka wait nahi
-    // karna padta — seedha order object se display-text ban jaata hai.
+    // The order list query already joins firm_name/contact_name (same as used
+    // in the table row), so there's no need to wait for the customers array to
+    // load — the display text can be built directly from the order object.
     setCustomerSearchQuery(`${order.firm_name || ''}${order.contact_name ? ` (${order.contact_name})` : ''}`)
     setForm({
       customer_id: order.customer_id,
@@ -497,44 +537,51 @@ function Orders() {
   const advance  = parseFloat(form.advance_paid) || 0
   const discount = parseFloat(form.discount_amount) || 0
   const balance  = total - advance - discount
-  // Cash advance amount ab sirf Denomination Counter se bharega jab tracking
-  // ON ho. advance === 0 tak field open rehti hai (mode-selector reveal karne
-  // ke liye), uske baad — agar cash hai — lock ho jaati hai.
+  // When tracking is on, the cash advance amount is only filled via the
+  // Denomination Counter. The field stays open while advance === 0 (so the
+  // mode selector can appear), then locks once cash is chosen and an amount exists.
   const advanceAmountLocked = noteTrackingEnabled && advance > 0 && form.advance_payment_mode === 'cash'
-  // Record-payment form mein ye issue nahi hai (mode-buttons hamesha visible
-  // hain), isliye seedha lock kar sakte hain.
+  // The record-payment form doesn't have that ordering problem (the mode
+  // buttons are always visible), so it can lock immediately.
   const paymentAmountLocked = noteTrackingEnabled && paymentForm.payment_mode === 'cash'
 
   return (
-    <div style={{ maxWidth: '100%', overflowX: 'hidden' }}>
-      <div style={styles.header}>
-        <h2>Orders</h2>
-        <button style={styles.addBtn} onClick={() => showForm ? resetForm() : setShowForm(true)}>
-          {showForm ? 'Cancel' : '+ New Order'}
-        </button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Orders"
+        subtitle="Track flex printing jobs, sizes, balances due, and statuses"
+        actions={
+          showForm ? (
+            <SecondaryButton icon={X} onClick={resetForm}>Cancel</SecondaryButton>
+          ) : (
+            <PrimaryButton icon={Plus} onClick={() => setShowForm(true)}>New Order</PrimaryButton>
+          )
+        }
+      />
 
       {message && (
-        <p style={styles.message} onClick={() => setMessage('')}>{message}</p>
+        <p
+          onClick={() => setMessage('')}
+          className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-4 py-3 rounded-xl cursor-pointer text-sm"
+        >
+          {message}
+        </p>
       )}
 
       {showForm && (
-        <div style={styles.formBox}>
-          <h3 style={{ marginBottom: '16px' }}>
+        <Card>
+          <h3 className="text-white font-bold mb-4">
             {editingOrder
               ? `Edit Order ${editingOrder.order_number ? `#${editingOrder.order_number}` : `#${editingOrder.id}`}`
               : 'New Order'}
           </h3>
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} className="space-y-4">
 
-            <div style={styles.formRow}>
-              <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1 min-w-0">
                 <input
                   type="text"
-                  style={{
-                    ...styles.input, width: '100%',
-                    ...(editingOrder ? { backgroundColor: '#f0f0f0', cursor: 'not-allowed' } : {})
-                  }}
+                  className={inputClasses}
                   placeholder="Search customer name... *"
                   value={customerSearchQuery}
                   autoComplete="off"
@@ -542,9 +589,9 @@ function Orders() {
                   onChange={e => {
                     setCustomerSearchQuery(e.target.value)
                     setShowCustomerDropdown(true)
-                    // Text badalte hi purani selection invalid ho jaati hai — jab tak
-                    // dropdown se dobara select na ho, customer_id khaali rahega
-                    // (yehi behavior "Record Other Payment" search-select mein bhi hai).
+                    // Editing the text invalidates the previous selection — customer_id stays
+                    // empty until a customer is re-selected from the dropdown (same behavior
+                    // as the "Record Other Payment" search-select).
                     if (form.customer_id) setForm(f => ({ ...f, customer_id: '' }))
                   }}
                   onFocus={() => !editingOrder && setShowCustomerDropdown(true)}
@@ -552,12 +599,10 @@ function Orders() {
 
                 {showCustomerDropdown && !editingOrder && (
                   <>
-                    <div onClick={() => setShowCustomerDropdown(false)} style={styles.filterMenuBackdrop} />
-                    <div style={{ ...styles.filterMenu, width: '100%', maxHeight: '260px', overflowY: 'auto' }}>
+                    <div onClick={() => setShowCustomerDropdown(false)} className="fixed inset-0 z-[90]" />
+                    <div className="absolute top-[calc(100%+6px)] left-0 w-full max-h-[260px] overflow-y-auto bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-[100]">
                       {filteredCustomers.length === 0 ? (
-                        <div style={{ padding: '10px 16px', fontSize: '13px', color: '#999' }}>
-                          Koi customer nahi mila
-                        </div>
+                        <div className="px-4 py-2.5 text-sm text-slate-500">Koi customer nahi mila</div>
                       ) : (
                         filteredCustomers.map(c => (
                           <button
@@ -568,11 +613,11 @@ function Orders() {
                               setCustomerSearchQuery(`${c.firm_name}${c.contact_name ? ` (${c.contact_name})` : ''}`)
                               setShowCustomerDropdown(false)
                             }}
-                            style={{ ...styles.filterMenuItem, textTransform: 'none' }}
+                            className="w-full text-left px-4 py-2.5 hover:bg-slate-700/60 transition-colors"
                           >
-                            <strong>{c.firm_name}</strong>
-                            {c.contact_name && <span style={{ color: '#888' }}> — {c.contact_name}</span>}
-                            {c.phone && <div style={{ color: '#aaa', fontSize: '11px' }}>{c.phone}</div>}
+                            <span className="font-bold text-slate-200 text-sm">{c.firm_name}</span>
+                            {c.contact_name && <span className="text-slate-400 text-sm"> — {c.contact_name}</span>}
+                            {c.phone && <div className="text-slate-500 text-xs">{c.phone}</div>}
                           </button>
                         ))
                       )}
@@ -581,7 +626,7 @@ function Orders() {
                 )}
               </div>
               <input
-                style={styles.input}
+                className={`${inputClasses} flex-1 min-w-0`}
                 placeholder="Description (e.g. Dukan ka flex)"
                 name="description"
                 value={form.description}
@@ -589,142 +634,123 @@ function Orders() {
               />
             </div>
 
-            <div style={{ marginBottom: '12px' }}>
-              <p style={{ fontSize: '13px', color: '#555', marginBottom: '8px', fontWeight: 'bold' }}>
+            <div>
+              <p className="text-xs font-bold text-slate-300 mb-2">
                 Line Items {editingOrder && (
-                  <span style={{ fontSize: '11px', color: '#e74c3c' }}>(editing will recalculate total)</span>
+                  <span className="text-[11px] text-red-400 font-normal">(editing will recalculate total)</span>
                 )}
               </p>
-              {items.map((item, index) => (
-                <div key={index} style={{ marginBottom: '10px', backgroundColor: '#f9f9f9', padding: '12px', borderRadius: '8px', boxSizing: 'border-box', maxWidth: '100%', overflowX: 'hidden' }}>
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center', flexWrap: 'wrap', rowGap: '8px' }}>
-                    <input
-                      style={{ ...styles.input, flex: 3, minWidth: '160px' }}
-                      placeholder="Item name (e.g. Flex 180GSM, Pipe 3kg, Labour)"
-                      value={item.item_name}
-                      onChange={e => handleItemChange(index, 'item_name', e.target.value)}
-                    />
-                    <input
-                      type="date"
-                      style={{ ...styles.input, maxWidth: '150px', minWidth: '130px', flex: 'none' }}
-                      value={item.item_date || ''}
-                      onChange={e => handleItemChange(index, 'item_date', e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => toggleSizeMode(index)}
-                      style={{
-                        ...styles.toggleBtn,
-                        backgroundColor: item.useSize ? '#1a1a2e' : '#fff',
-                        color: item.useSize ? '#fff' : '#333',
-                        display: 'inline-flex', alignItems: 'center', gap: '4px',
-                        flexShrink: 0
-                      }}
-                    >
-                      <Ruler size={13} /> {item.useSize ? 'Size ON' : 'L×B'}
-                    </button>
-                    <button type="button" onClick={() => removeItemRow(index)} style={{ ...styles.removeBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><X size={14} /></button>
-                  </div>
+              <div className="space-y-2.5">
+                {items.map((item, index) => (
+                  <div key={index} className="bg-slate-800/40 border border-slate-800 p-3 rounded-xl">
+                    <div className="flex gap-2 mb-2 items-center flex-wrap">
+                      <input
+                        className={`${inputClasses} flex-[3] min-w-[160px]`}
+                        placeholder="Item name (e.g. Flex 180GSM, Pipe 3kg, Labour)"
+                        value={item.item_name}
+                        onChange={e => handleItemChange(index, 'item_name', e.target.value)}
+                      />
+                      <input
+                        type="date"
+                        className={`${inputClasses} max-w-[150px] min-w-[130px] flex-none`}
+                        value={item.item_date || ''}
+                        onChange={e => handleItemChange(index, 'item_date', e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => toggleSizeMode(index)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border shrink-0 transition-all ${
+                          item.useSize ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+                        }`}
+                      >
+                        <Ruler className="w-3.5 h-3.5" /> {item.useSize ? 'Size ON' : 'L×B'}
+                      </button>
+                      <IconButton icon={X} onClick={() => removeItemRow(index)} className="bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 shrink-0" />
+                    </div>
 
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', rowGap: '10px', width: '100%' }}>
-                    {item.useSize ? (
-                      // Pehle Length/×/Breadth/×/Pcs/=/Sq.ft — 7 alag flex-items the, jinka
-                      // total minWidth-demand narrow screen pe container se zyada ho jaata
-                      // tha aur flex-wrap reliably wrap nahi kar pata tha (page horizontal-
-                      // overflow karta tha). Ab ek CSS Grid (auto-fit) mein — ye guaranteed
-                      // wrap karta hai, chahe screen kitni bhi narrow ho. × aur = signs ab
-                      // ek chhoti formula-preview line mein hain (bonus: live calculation
-                      // dikhta rehta hai).
-                      <div style={{ flex: '1 1 100%', minWidth: 0 }}>
-                        {(item.length || item.breadth || item.pieces) && (
-                          <div style={{ fontSize: '12px', color: '#888', marginBottom: '6px' }}>
-                            {item.length || 0} ft × {item.breadth || 0} ft × {item.pieces || 1} pcs = <strong style={{ color: '#27ae60' }}>{item.quantity || 0} sq.ft</strong>
-                          </div>
-                        )}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(70px, 1fr))', gap: '8px' }}>
-                          <div>
-                            <label style={styles.label}>Length (ft)</label>
-                            <input style={{ ...styles.input, minWidth: 0, width: '100%' }} type="number" placeholder="e.g. 10"
-                              value={item.length} onChange={e => handleItemChange(index, 'length', e.target.value)} />
-                          </div>
-                          <div>
-                            <label style={styles.label}>Breadth (ft)</label>
-                            <input style={{ ...styles.input, minWidth: 0, width: '100%' }} type="number" placeholder="e.g. 4"
-                              value={item.breadth} onChange={e => handleItemChange(index, 'breadth', e.target.value)} />
-                          </div>
-                          <div>
-                            <label style={styles.label}>Pcs</label>
-                            <input style={{ ...styles.input, minWidth: 0, width: '100%' }} type="number" placeholder="1"
-                              value={item.pieces} onChange={e => handleItemChange(index, 'pieces', e.target.value)} />
-                          </div>
-                          <div>
-                            <label style={styles.label}>Sq.ft (auto)</label>
-                            <input style={{ ...styles.input, minWidth: 0, width: '100%', backgroundColor: '#e8f5e9' }} value={item.quantity} readOnly />
+                    <div className="flex gap-2 items-end flex-wrap">
+                      {item.useSize ? (
+                        <div className="flex-[1_1_100%] min-w-0">
+                          {(item.length || item.breadth || item.pieces) && (
+                            <div className="text-xs text-slate-400 mb-1.5">
+                              {item.length || 0} ft × {item.breadth || 0} ft × {item.pieces || 1} pcs = <strong className="text-emerald-400">{item.quantity || 0} sq.ft</strong>
+                            </div>
+                          )}
+                          <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(70px, 1fr))' }}>
+                            <div>
+                              <label className={labelClasses}>Length (ft)</label>
+                              <input className={inputClasses} type="number" placeholder="e.g. 10"
+                                value={item.length} onChange={e => handleItemChange(index, 'length', e.target.value)} />
+                            </div>
+                            <div>
+                              <label className={labelClasses}>Breadth (ft)</label>
+                              <input className={inputClasses} type="number" placeholder="e.g. 4"
+                                value={item.breadth} onChange={e => handleItemChange(index, 'breadth', e.target.value)} />
+                            </div>
+                            <div>
+                              <label className={labelClasses}>Pcs</label>
+                              <input className={inputClasses} type="number" placeholder="1"
+                                value={item.pieces} onChange={e => handleItemChange(index, 'pieces', e.target.value)} />
+                            </div>
+                            <div>
+                              <label className={labelClasses}>Sq.ft (auto)</label>
+                              <input className={`${inputClasses} bg-emerald-500/10 text-emerald-300`} value={item.quantity} readOnly />
+                            </div>
                           </div>
                         </div>
+                      ) : (
+                        <div className="flex-[0_1_150px] min-w-[90px] max-w-[180px]">
+                          <label className={labelClasses}>Quantity / Sq.ft</label>
+                          <input className={inputClasses} type="number" placeholder="0"
+                            value={item.quantity} onChange={e => handleItemChange(index, 'quantity', e.target.value)} />
+                        </div>
+                      )}
+                      <div className="flex-[0_1_150px] min-w-[90px] max-w-[180px]">
+                        <label className={labelClasses}>Rate (₹)</label>
+                        <input className={inputClasses} type="number" placeholder="0"
+                          value={item.unit_price} onChange={e => handleItemChange(index, 'unit_price', e.target.value)} />
                       </div>
-                    ) : (
-                      // flex:1 pehle wide-screen par teeno columns ko poori row-width
-                      // equally baant deta tha — input apni chhoti intrinsic-width hi
-                      // leta tha (width:100% missing), isliye Subtotal door chala jaata
-                      // tha bade khaali gap ke saath. Ab flex-grow band, maxWidth-capped
-                      // — compact rehta hai chahe screen kitni bhi wide ho.
-                      <div style={{ flex: '0 1 150px', minWidth: '90px', maxWidth: '180px' }}>
-                        <label style={styles.label}>Quantity / Sq.ft</label>
-                        <input style={{ ...styles.input, minWidth: '0', width: '100%' }} type="number" placeholder="0"
-                          value={item.quantity} onChange={e => handleItemChange(index, 'quantity', e.target.value)} />
-                      </div>
-                    )}
-                    <div style={{ flex: '0 1 150px', minWidth: '90px', maxWidth: '180px' }}>
-                      <label style={styles.label}>Rate (₹)</label>
-                      <input style={{ ...styles.input, minWidth: '0', width: '100%' }} type="number" placeholder="0"
-                        value={item.unit_price} onChange={e => handleItemChange(index, 'unit_price', e.target.value)} />
-                    </div>
-                    <div style={{ flex: '0 1 150px', minWidth: '90px', maxWidth: '180px' }}>
-                      <label style={styles.label}>Subtotal</label>
-                      <div style={{ padding: '10px', fontWeight: 'bold', fontSize: '16px' }}>
-                        ₹{((parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0)).toFixed(2)}
+                      <div className="flex-[0_1_150px] min-w-[90px] max-w-[180px]">
+                        <label className={labelClasses}>Subtotal</label>
+                        <div className="py-2.5 font-bold text-base text-white">
+                          ₹{((parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0)).toFixed(2)}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-              <button type="button" onClick={addItemRow} style={styles.addItemBtn}>+ Add Item</button>
+                ))}
+              </div>
+              <SecondaryButton icon={Plus} className="mt-2.5" onClick={addItemRow} type="button">Add Item</SecondaryButton>
             </div>
 
             {/* ── Totals + Advance Section ── */}
-            <div style={styles.totalsBox}>
-              <div style={styles.totalRow}>
-                <span>Total Amount:</span>
-                <strong>₹{total.toFixed(2)}</strong>
+            <div className="bg-slate-800/40 border border-slate-800 p-4 rounded-xl flex flex-col gap-3 max-w-[480px] w-full">
+              <div className="flex justify-between items-center gap-2 flex-wrap">
+                <span className="text-sm text-slate-300">Total Amount:</span>
+                <strong className="text-white text-base">₹{total.toFixed(2)}</strong>
               </div>
 
-              <div style={styles.totalRow}>
-                <span>Advance Paid:</span>
+              <div className="flex justify-between items-center gap-2 flex-wrap">
+                <span className="text-sm text-slate-300">Advance Paid:</span>
                 <div>
                   <input
-                    style={{
-                      ...styles.input, width: '150px', flex: 'none',
-                      ...(advanceAmountLocked ? { backgroundColor: '#f0f0f0', cursor: 'not-allowed' } : {})
-                    }}
+                    className={`${inputClasses} max-w-[150px] flex-none`}
                     placeholder="0" type="number" name="advance_paid"
                     value={form.advance_paid} onChange={handleFormChange}
                     readOnly={advanceAmountLocked}
                   />
                   {advanceAmountLocked && (
-                    <div style={{ fontSize: '11px', color: '#888', marginTop: '2px' }}>
-                      Denomination counter se bharo (neeche)
-                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">Denomination counter se bharo (neeche)</div>
                   )}
                 </div>
               </div>
 
               {advance > 0 && (
-                <div style={styles.totalRow}>
-                  <span>Advance Date:</span>
+                <div className="flex justify-between items-center gap-2 flex-wrap">
+                  <span className="text-sm text-slate-300">Advance Date:</span>
                   <input
                     type="date"
-                    style={{ ...styles.input, width: '150px', flex: 'none' }}
+                    className={`${inputClasses} max-w-[150px] flex-none`}
                     name="advance_payment_date"
                     value={form.advance_payment_date}
                     onChange={handleFormChange}
@@ -734,35 +760,15 @@ function Orders() {
 
               {advance > 0 && (
                 <>
-                  <div style={styles.totalRow}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      Payment Mode
-                      <span style={styles.requiredDot}>*</span>
+                  <div className="flex justify-between items-center gap-2 flex-wrap">
+                    <span className="text-sm text-slate-300 flex items-center gap-1">
+                      Payment Mode <span className="text-red-400">*</span>
                     </span>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        type="button"
-                        onClick={() => setForm(f => ({ ...f, advance_payment_mode: 'cash', advance_upi_account: '' }))}
-                        style={{
-                          ...styles.modeBtn,
-                          ...(form.advance_payment_mode === 'cash' ? styles.modeBtnActive : {}),
-                          display: 'inline-flex', alignItems: 'center', gap: '6px'
-                        }}
-                      >
-                        <Banknote size={14} /> Cash
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setForm(f => ({ ...f, advance_payment_mode: 'upi' }))}
-                        style={{
-                          ...styles.modeBtn,
-                          ...(form.advance_payment_mode === 'upi' ? styles.modeBtnActive : {}),
-                          display: 'inline-flex', alignItems: 'center', gap: '6px'
-                        }}
-                      >
-                        <Smartphone size={14} /> UPI
-                      </button>
-                    </div>
+                    <PaymentModeButtons
+                      value={form.advance_payment_mode}
+                      options={['cash', 'upi']}
+                      onChange={mode => setForm(f => ({ ...f, advance_payment_mode: mode, advance_upi_account: mode !== 'upi' ? '' : f.advance_upi_account }))}
+                    />
                   </div>
 
                   {form.advance_payment_mode === 'cash' && noteTrackingEnabled && (
@@ -776,16 +782,15 @@ function Orders() {
                   )}
 
                   {form.advance_payment_mode === 'upi' && (
-                    <div style={styles.totalRow}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        UPI Account
-                        <span style={styles.requiredDot}>*</span>
+                    <div className="flex justify-between items-center gap-2 flex-wrap">
+                      <span className="text-sm text-slate-300 flex items-center gap-1">
+                        UPI Account <span className="text-red-400">*</span>
                       </span>
                       <select
                         name="advance_upi_account"
                         value={form.advance_upi_account}
                         onChange={handleFormChange}
-                        style={{ ...styles.input, width: '220px', flex: 'none' }}
+                        className={`${inputClasses} max-w-[220px] flex-none`}
                         required
                       >
                         <option value="">Select UPI Account</option>
@@ -798,16 +803,16 @@ function Orders() {
                 </>
               )}
 
-              <div style={styles.totalRow}>
-                <span>Discount / Round-off:</span>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <div className="flex justify-between items-center gap-2 flex-wrap">
+                <span className="text-sm text-slate-300">Discount / Round-off:</span>
+                <div className="flex gap-1.5 items-center">
                   <input
-                    style={{ ...styles.input, width: '110px', flex: 'none' }}
+                    className={`${inputClasses} max-w-[110px] flex-none`}
                     placeholder="₹0" type="number" name="discount_amount"
                     value={form.discount_amount} onChange={handleFormChange}
                   />
                   <input
-                    style={{ ...styles.input, width: '160px', flex: 'none' }}
+                    className={`${inputClasses} max-w-[160px] flex-none`}
                     placeholder="Note (e.g. round-off)"
                     name="discount_note"
                     value={form.discount_note} onChange={handleFormChange}
@@ -815,76 +820,78 @@ function Orders() {
                 </div>
               </div>
 
-              <div style={styles.totalRow}>
-                <span>Balance Due:</span>
-                <strong style={{ color: balance > 0 ? '#e74c3c' : '#27ae60' }}>
+              <div className="flex justify-between items-center gap-2 flex-wrap">
+                <span className="text-sm text-slate-300">Balance Due:</span>
+                <strong className={balance > 0 ? 'text-red-400' : 'text-emerald-400'}>
                   ₹{balance.toFixed(2)}
                 </strong>
               </div>
             </div>
 
-            <div style={styles.formRow}>
-              <div style={{ flex: 1 }}>
-                <label style={styles.label}>Follow-up Date</label>
-                <input style={styles.input} type="date" name="follow_up_date"
+            <div className="flex gap-3 flex-wrap">
+              <div className="flex-1 min-w-[180px]">
+                <label className={labelClasses}>Follow-up Date</label>
+                <input className={inputClasses} type="date" name="follow_up_date"
                   value={form.follow_up_date} onChange={handleFormChange} />
               </div>
-              <div style={{ flex: 2 }}>
-                <label style={styles.label}>Notes</label>
-                <input style={styles.input} placeholder="Size, GSM, special notes..."
+              <div className="flex-[2] min-w-[220px]">
+                <label className={labelClasses}>Notes</label>
+                <input className={inputClasses} placeholder="Size, GSM, special notes..."
                   name="notes" value={form.notes} onChange={handleFormChange} />
               </div>
             </div>
 
-            <LoadingButton loading={submitting} style={styles.submitBtn} type="submit">
+            <LoadingButton
+              loading={submitting}
+              type="submit"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25"
+            >
               {editingOrder ? 'Update Order' : 'Create Order'}
             </LoadingButton>
           </form>
-        </div>
+        </Card>
       )}
-      <div style={styles.searchRow}>
-        <div style={{ position: 'relative', flex: 1, maxWidth: '340px' }}>
-          <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#aaa' }} />
+
+      {/* Search + Filter bar */}
+      <Card className="!p-4 flex flex-col md:flex-row items-center gap-3">
+        <div className="relative flex-1 w-full">
+          <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             placeholder="Search by Order No. / Firm Name / Phone..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            style={{ ...styles.searchInput, width: '100%', paddingLeft: '36px' }}
+            className={`${inputClasses} pl-10`}
           />
         </div>
         {searchQuery && (
-          <button onClick={() => setSearchQuery('')} style={{ ...styles.clearSearchBtn, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-            <X size={13} /> Clear
-          </button>
+          <SecondaryButton icon={X} onClick={() => setSearchQuery('')} className="shrink-0">Clear</SecondaryButton>
         )}
 
-        {/* Status filter — ab dropdown mein, search ke saath hi single line */}
-        <div style={{ position: 'relative' }}>
+        {/* Status filter — dropdown menu, single line ke saath */}
+        <div className="relative shrink-0">
           <button
             onClick={() => setShowFilterMenu(o => !o)}
-            style={{
-              ...styles.filterDropdownBtn,
-              ...(filterStatus ? styles.filterDropdownBtnActive : {})
-            }}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold border capitalize transition-all whitespace-nowrap ${
+              filterStatus ? 'bg-blue-600/15 border-blue-500/40 text-blue-400' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+            }`}
           >
-            <ListFilter size={14} />
+            <ListFilter className="w-3.5 h-3.5" />
             {filterStatus === '' ? 'Filter' : filterStatus.replace('_', ' ')}
-            <ChevronDown size={13} />
+            <ChevronDown className="w-3.5 h-3.5" />
           </button>
 
           {showFilterMenu && (
             <>
-              <div onClick={() => setShowFilterMenu(false)} style={styles.filterMenuBackdrop} />
-              <div style={styles.filterMenu}>
+              <div onClick={() => setShowFilterMenu(false)} className="fixed inset-0 z-[90]" />
+              <div className="absolute top-[calc(100%+6px)] left-0 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-[100] min-w-[160px] overflow-hidden">
                 {['', 'pending', 'in_progress', 'ready', 'delivered'].map(s => (
                   <button
                     key={s}
                     onClick={() => { setFilterStatus(s); setShowFilterMenu(false) }}
-                    style={{
-                      ...styles.filterMenuItem,
-                      ...(filterStatus === s ? styles.filterMenuItemActive : {})
-                    }}
+                    className={`block w-full text-left px-4 py-2.5 text-sm capitalize transition-colors ${
+                      filterStatus === s ? 'bg-blue-600 text-white font-bold' : 'text-slate-300 hover:bg-slate-700/60'
+                    }`}
                   >
                     {s === '' ? 'All' : s.replace('_', ' ')}
                   </button>
@@ -893,667 +900,529 @@ function Orders() {
             </>
           )}
         </div>
-      </div>
+      </Card>
 
-          {loading ? <SectionLoader label="Orders load ho rahe hain..." /> : orders.length === 0 ? (
-          <p style={{ color: '#888' }}>No orders found.</p>
-        ) : filteredOrders.length === 0 ? (
-          <p style={{ color: '#888' }}>No orders match your search.</p>
-        ) : (
-        <div style={styles.tableScroll}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Order No.</th>
-              <th style={styles.th}>Firm</th>
-              <th style={styles.th}>Description</th>
-              <th style={styles.th}>Total</th>
-              <th style={styles.th}>Balance</th>
-              <th style={styles.th}>Status</th>
-              <th style={styles.th}>Follow-up</th>
-              <th style={styles.th}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredOrders.map((o) => (
-              <>
-                <tr key={o.id} style={styles.tr}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}
-                >
-                  {/* ── ORDER NUMBER CELL ── */}
-                  <td style={styles.td}>
-                    {o.order_number ? (
-                      <span style={styles.orderNumberBadge}>{o.order_number}</span>
-                    ) : (
-                      <span style={{ color: '#bbb', fontSize: '12px' }}>#{o.id}</span>
-                    )}
-                  </td>
-
-                  <td style={styles.td}>
-                    <strong>{o.firm_name}</strong><br />
-                    <span style={{ fontSize: '12px', color: '#888' }}>{o.phone}</span>
-                  </td>
-                  <td style={styles.td}>{o.description || '—'}</td>
-                  <td style={styles.td}>₹{o.total_amount}</td>
-                  <td style={styles.td}>
-                    <span style={{ color: o.balance_due > 0 ? '#e74c3c' : '#27ae60', fontWeight: 'bold' }}>
-                      ₹{o.balance_due}
-                    </span>
-                  </td>
-                  <td style={styles.td}>
-                    <select
-                      value={o.status}
-                      onChange={e => handleStatusChange(o.id, e.target.value)}
-                      style={{ ...styles.statusSelect, backgroundColor: statusColor(o.status) }}
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="ready">Ready</option>
-                      <option value="delivered">Delivered</option>
-                    </select>
-                  </td>
-                  <td style={styles.td}>
-                    {editingFollowUp === o.id ? (
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        <input
-                          type="date"
-                          value={followUpValue}
-                          onChange={e => setFollowUpValue(e.target.value)}
-                          style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #3498db', fontSize: '13px' }}
-                          autoFocus
-                        />
-                        <button
-                          onClick={() => handleFollowUpSave(o.id)}
-                          style={{ backgroundColor: '#27ae60', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', display: 'inline-flex', alignItems: 'center' }}
-                        >
-                          <Check size={13} />
-                        </button>
-                        <button
-                          onClick={() => setEditingFollowUp(null)}
-                          style={{ backgroundColor: '#fff', color: '#888', border: '1px solid #ddd', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', display: 'inline-flex', alignItems: 'center' }}
-                        >
-                          <X size={13} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span
-                          style={{ color: o.follow_up_date && o.follow_up_date <= new Date().toLocaleDateString('en-CA') ? '#e74c3c' : '#333', cursor: 'pointer' }}
-                          onClick={() => { setEditingFollowUp(o.id); setFollowUpValue(o.follow_up_date || '') }}
-                        >
-                          {o.follow_up_date || '—'}
+      {loading ? <SectionLoader label="Orders load ho rahe hain..." /> : orders.length === 0 ? (
+        <p className="text-slate-500 text-sm">No orders found.</p>
+      ) : filteredOrders.length === 0 ? (
+        <p className="text-slate-500 text-sm">No orders match your search.</p>
+      ) : (
+        <Card padded={false} className="overflow-hidden">
+          <Table minWidth="900px">
+            <THead>
+              <Th className="pl-4">Order No.</Th>
+              <Th>Firm</Th>
+              <Th>Description</Th>
+              <Th>Total</Th>
+              <Th>Balance</Th>
+              <Th>Status</Th>
+              <Th>Follow-up</Th>
+              <Th className="pr-4">Actions</Th>
+            </THead>
+            <TBody>
+              {filteredOrders.map((o) => (
+                <Fragment key={o.id}>
+                  <Tr key={o.id}>
+                    <Td className="pl-4">
+                      {o.order_number ? (
+                        <span className="inline-block bg-slate-800 border border-slate-700 text-white px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wide font-mono">
+                          {o.order_number}
                         </span>
-                        <button
-                          onClick={() => { setEditingFollowUp(o.id); setFollowUpValue(o.follow_up_date || '') }}
-                          style={{ backgroundColor: '#f0f0f0', border: '1px solid #ddd', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', color: '#555', display: 'inline-flex', alignItems: 'center' }}
-                        >
-                          <Pencil size={11} />
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                  <td style={styles.td}>
-                    <button onClick={() => toggleExpand(o)} style={{ ...styles.detailBtn, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      {expandedOrder === o.id ? <><ChevronUp size={12} /> Hide</> : <><ChevronDown size={12} /> Details</>}
-                    </button>
-                    <button onClick={() => openEditForm(o)} style={{ ...styles.editBtn, marginLeft: '6px' }}>
-                      Edit
-                    </button>
-                    <LoadingButton
-                      loading={downloadingBillId === o.id}
-                      loadingText="..."
-                      onClick={() => {
-                        setDownloadingBillId(o.id)
-                        generatePDF(o.id)
-                          .then(res => {
-                            const blobUrl = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
-                            const link = document.createElement('a')
-                            link.href = blobUrl
-                            link.download = `${o.order_number || `bill-${o.id}`}.pdf`
-                            document.body.appendChild(link)
-                            link.click()
-                            document.body.removeChild(link)
-                            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10000)
-                          })
-                          .catch(() => setMessage('Error loading bill PDF.'))
-                          .finally(() => setDownloadingBillId(null))
-                      }}
-                      style={{
-                        backgroundColor: '#fff',
-                        color: '#1a1a2e',
-                        border: '1px solid #1a1a2e',
-                        padding: '5px 12px',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        marginLeft: '6px'
-                      }}
-                    >
-                      <FileText size={12} /> Bill
-                    </LoadingButton>
-                    <button
-                      onClick={() => {
-                        if (waStatus === 'disabled') return setMessage('WhatsApp is Disabled in Demo due to security reasons.')
-                        if (!o.phone) return setMessage('Customer has no phone number.')
-                        setSelectedUpiForWA('')
-                        setWaSendModal(o)
-                      }}
-                      style={{
-                        backgroundColor: waStatus === 'ready' ? '#fff' : '#f5f5f5',
-                        color: waStatus === 'ready' ? '#1a1a2e' : '#aaa',
-                        border: waStatus === 'ready' ? '1px solid #1a1a2e' : '1px solid #ddd',
-                        padding: '5px 12px',
-                        borderRadius: '4px',
-                        cursor: waStatus === 'ready' ? 'pointer' : 'not-allowed',
-                        fontSize: '12px',
-                        marginLeft: '6px',
-                        display: 'inline-flex', alignItems: 'center', gap: '4px'
-                      }}
-                      title={waStatus === 'disabled' ? 'Disabled in Demo due to security reasons' : waStatus === 'ready' ? 'Send bill on WhatsApp' : 'WhatsApp not connected'}
-                    >
-                      <Smartphone size={12} /> WA
-                    </button>
-                    <button onClick={() => handleDeleteOrder(o)} style={{ ...styles.deleteBtn, marginLeft: '6px' }}>
-                      Delete
-                    </button>
-                  </td>
-                </tr>
+                      ) : (
+                        <span className="text-slate-500 text-xs">#{o.id}</span>
+                      )}
+                    </Td>
 
-                {expandedOrder === o.id && orderDetail && (
-                  <tr key={`detail-${o.id}`}>
-                    <td colSpan="8" style={styles.detailCell}>
-                      <div style={styles.detailBox}>
-
-                        {/* ── ORDER NUMBER HEADER in detail ── */}
-                        {orderDetail.order_number && (
-                          <div style={{
-                            display: 'flex', alignItems: 'center', gap: '12px',
-                            padding: '10px 16px', backgroundColor: '#1a1a2e',
-                            borderRadius: '8px', marginBottom: '4px'
-                          }}>
-                            <span style={{ color: '#aaa', fontSize: '13px' }}>Order Number</span>
-                            <span style={{
-                              color: '#fff', fontSize: '18px', fontWeight: 'bold',
-                              letterSpacing: '1px', fontFamily: 'monospace'
-                            }}>
-                              {orderDetail.order_number}
-                            </span>
-                            <span style={{
-                              marginLeft: 'auto', fontSize: '12px', color: '#aaa'
-                            }}>
-                              {orderDetail.firm_name} · {orderDetail.created_at
-                                ? new Date(orderDetail.created_at).toLocaleDateString('en-GB').replace(/\//g, '.')
-                                : ''}
-                            </span>
-                          </div>
-                        )}
-
-                        <div style={styles.detailSection}>
-                          <h4 style={{ ...styles.detailTitle, display: 'flex', alignItems: 'center', gap: '6px' }}><Package size={15} /> Order Items</h4>
-                          <div style={styles.tableScroll}>
-                          <table style={styles.innerTable}>
-                            <thead>
-                              <tr>
-                                <th style={styles.innerTh}>Item</th>
-                                <th style={styles.innerTh}>Qty/Sq.ft</th>
-                                <th style={styles.innerTh}>Rate</th>
-                                <th style={styles.innerTh}>Subtotal</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {orderDetail.items && orderDetail.items.map(item => (
-                                <tr key={item.id}>
-                                  <td style={styles.innerTd}>{item.item_name}</td>
-                                  <td style={styles.innerTd}>{item.quantity}</td>
-                                  <td style={styles.innerTd}>₹{item.unit_price}</td>
-                                  <td style={styles.innerTd}>₹{item.subtotal}</td>
-                                </tr>
-                              ))}
-                              <tr style={{ backgroundColor: '#f0f7ff' }}>
-                                <td colSpan="3" style={{ ...styles.innerTd, fontWeight: 'bold', textAlign: 'right' }}>Total:</td>
-                                <td style={{ ...styles.innerTd, fontWeight: 'bold', fontSize: '16px', color: '#1a1a2e' }}>
-                                  ₹{orderDetail.total_amount}
-                                </td>
-                              </tr>
-                            </tbody>
-                          </table>
-                          </div>
+                    <Td>
+                      <p className="font-bold text-white">{o.firm_name}</p>
+                      <p className="text-xs text-slate-500">{o.phone}</p>
+                    </Td>
+                    <Td className="text-slate-300">{o.description || '—'}</Td>
+                    <Td className="font-mono text-slate-200">₹{o.total_amount}</Td>
+                    <Td>
+                      <span className={`font-mono font-bold ${o.balance_due > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                        ₹{o.balance_due}
+                      </span>
+                    </Td>
+                    <Td>
+                      <StatusDropdown value={o.status} onChange={val => handleStatusChange(o.id, val)} />
+                    </Td>
+                    <Td>
+                      {editingFollowUp === o.id ? (
+                        <div className="flex gap-1.5 items-center">
+                          <input
+                            type="date"
+                            value={followUpValue}
+                            onChange={e => setFollowUpValue(e.target.value)}
+                            className="bg-slate-800 border border-blue-500 text-slate-200 rounded-lg px-2 py-1 text-xs"
+                            autoFocus
+                          />
+                          <IconButton icon={Check} onClick={() => handleFollowUpSave(o.id)} className="bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 !p-1.5" />
+                          <IconButton icon={X} onClick={() => setEditingFollowUp(null)} className="bg-slate-800 border border-slate-700 !p-1.5" />
                         </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`cursor-pointer ${o.follow_up_date && o.follow_up_date <= new Date().toLocaleDateString('en-CA') ? 'text-red-400' : 'text-slate-300'}`}
+                            onClick={() => { setEditingFollowUp(o.id); setFollowUpValue(o.follow_up_date || '') }}
+                          >
+                            {o.follow_up_date || '—'}
+                          </span>
+                          <IconButton
+                            icon={Pencil}
+                            onClick={() => { setEditingFollowUp(o.id); setFollowUpValue(o.follow_up_date || '') }}
+                            className="!p-1.5 bg-slate-800/60"
+                          />
+                        </div>
+                      )}
+                    </Td>
+                    <Td className="pr-4">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          onClick={() => toggleExpand(o)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700/80 transition-all"
+                        >
+                          {expandedOrder === o.id ? <><ChevronUp className="w-3 h-3" /> Hide</> : <><ChevronDown className="w-3 h-3" /> Details</>}
+                        </button>
+                        <button
+                          onClick={() => openEditForm(o)}
+                          className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700/80 transition-all"
+                        >
+                          Edit
+                        </button>
+                        <LoadingButton
+                          loading={downloadingBillId === o.id}
+                          loadingText="..."
+                          onClick={() => {
+                            setDownloadingBillId(o.id)
+                            generatePDF(o.id)
+                              .then(res => {
+                                const blobUrl = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+                                const link = document.createElement('a')
+                                link.href = blobUrl
+                                link.download = `${o.order_number || `bill-${o.id}`}.pdf`
+                                document.body.appendChild(link)
+                                link.click()
+                                document.body.removeChild(link)
+                                setTimeout(() => window.URL.revokeObjectURL(blobUrl), 10000)
+                              })
+                              .catch(() => setMessage('Error loading bill PDF.'))
+                              .finally(() => setDownloadingBillId(null))
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-800 border border-slate-700 text-blue-400 hover:bg-slate-700/80"
+                        >
+                          <FileText className="w-3 h-3" /> Bill
+                        </LoadingButton>
+                        <button
+                          onClick={() => {
+                            if (waStatus === 'disabled') return setMessage('WhatsApp is Disabled in Demo due to security reasons.')
+                            if (!o.phone) return setMessage('Customer has no phone number.')
+                            setSelectedUpiForWA('')
+                            setWaSendModal(o)
+                          }}
+                          title={waStatus === 'disabled' ? 'Disabled in Demo due to security reasons' : waStatus === 'ready' ? 'Send bill on WhatsApp' : 'WhatsApp not connected'}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all ${
+                            waStatus === 'ready'
+                              ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80 cursor-pointer'
+                              : 'bg-slate-800/50 border-slate-800 text-slate-600 cursor-not-allowed'
+                          }`}
+                        >
+                          <Smartphone className="w-3 h-3" /> WA
+                        </button>
+                        <IconButton
+                          icon={Trash2}
+                          onClick={() => handleDeleteOrder(o)}
+                          className="bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 !p-1.5"
+                        />
+                      </div>
+                    </Td>
+                  </Tr>
 
-                        <div style={styles.detailSection}>
-                          <h4 style={{ ...styles.detailTitle, display: 'flex', alignItems: 'center', gap: '6px' }}><Wallet size={15} /> Payment History</h4>
-                          <div style={styles.tableScroll}>
-                          <table style={styles.innerTable}>
-                            <thead>
-                              <tr>
-                                <th style={styles.innerTh}>#</th>
-                                <th style={styles.innerTh}>Date</th>
-                                <th style={styles.innerTh}>Amount</th>
-                                <th style={styles.innerTh}>Note</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {orderDetail.advance_paid > 0 && (
-                                <tr style={{ backgroundColor: '#fff9e6' }}>
-                                  <td style={styles.innerTd}>1</td>
-                                  <td style={styles.innerTd}>
-                                    {orderDetail.created_at ? (() => {
-                                      const d = new Date(orderDetail.advance_payment_date || orderDetail.created_at)
-                                      const date = d.toLocaleDateString('en-GB').replace(/\//g, '.')
-                                      const time = d.toLocaleTimeString('en-GB', { hour12: false })
-                                      return <span>{time}<br /><span style={{ fontSize: '11px', color: '#888' }}>{date}</span></span>
-                                    })() : '—'}
-                                  </td>
-                                  <td style={styles.innerTd}><strong>₹{orderDetail.advance_paid}</strong></td>
-                                  <td style={styles.innerTd}>
-                                    <span style={styles.advanceBadge}>Advance</span>
-                                    {orderDetail.advance_payment_mode && (
-                                      <span style={{
-                                        ...styles.advanceBadge,
-                                        marginLeft: '6px',
-                                        backgroundColor: orderDetail.advance_payment_mode === 'upi' ? '#e3f2fd' : '#e8f5e9',
-                                        color: orderDetail.advance_payment_mode === 'upi' ? '#1565c0' : '#2e7d32'
-                                      }}>
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                        {orderDetail.advance_payment_mode === 'upi' ? <><Smartphone size={11} /> UPI</> : <><Banknote size={11} /> Cash</>}
-                                      </span>
-                                      </span>
-                                    )}
-                                  </td>
+                  {expandedOrder === o.id && orderDetail && (
+                    <tr key={`detail-${o.id}`}>
+                      <td colSpan="8" className="p-0 bg-slate-950/60 border-b-2 border-slate-800">
+                        <div className="p-4 flex flex-col gap-4">
+
+                          {orderDetail.order_number && (
+                            <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl">
+                              <span className="text-slate-400 text-xs">Order Number</span>
+                              <span className="text-white text-lg font-bold tracking-wide font-mono">{orderDetail.order_number}</span>
+                              <span className="ml-auto text-xs text-slate-500">
+                                {orderDetail.firm_name} · {orderDetail.created_at
+                                  ? new Date(orderDetail.created_at).toLocaleDateString('en-GB').replace(/\//g, '.')
+                                  : ''}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
+                            <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-1.5"><Package className="w-3.5 h-3.5" /> Order Items</h4>
+                            <Table minWidth="500px">
+                              <THead>
+                                <Th>Item</Th>
+                                <Th>Qty/Sq.ft</Th>
+                                <Th>Rate</Th>
+                                <Th>Subtotal</Th>
+                              </THead>
+                              <TBody>
+                                {orderDetail.items && orderDetail.items.map(item => (
+                                  <Tr key={item.id}>
+                                    <Td className="text-slate-300">{item.item_name}</Td>
+                                    <Td className="text-slate-300">{item.quantity}</Td>
+                                    <Td className="text-slate-300">₹{item.unit_price}</Td>
+                                    <Td className="text-slate-200">₹{item.subtotal}</Td>
+                                  </Tr>
+                                ))}
+                                <tr className="bg-blue-500/5">
+                                  <td colSpan="3" className="py-3 pr-4 text-right font-bold text-slate-300">Total:</td>
+                                  <td className="py-3 font-bold text-base text-white">₹{orderDetail.total_amount}</td>
                                 </tr>
-                              )}
-                              {orderDetail.payments && orderDetail.payments.map((p, i) => (
-                                <tr key={p.id}>
-                                  <td style={styles.innerTd}>{(orderDetail.advance_paid > 0 ? 2 : 1) + i}</td>
-                                  <td style={styles.innerTd}>
-                                    {(p.created_at || p.payment_date) ? (() => {
-                                      const d = new Date(p.created_at || p.payment_date)
-                                      if (isNaN(d)) return p.created_at || p.payment_date
-                                      const date = d.toLocaleDateString('en-GB').replace(/\//g, '.')
-                                      const time = d.toLocaleTimeString('en-GB', { hour12: false })
-                                      return <span>{time}<br /><span style={{ fontSize: '11px', color: '#888' }}>{date}</span></span>
-                                    })() : '—'}
-                                  </td>
-                                  <td style={styles.innerTd}><strong>₹{p.amount}</strong></td>
-                                  <td style={styles.innerTd}>
-                                    {p.note || '—'}
-                                    {p.payment_mode && (
-                                      <span style={{
-                                        ...styles.advanceBadge,
-                                        marginLeft: '6px',
-                                        backgroundColor: p.payment_mode === 'upi' ? '#e3f2fd' : '#e8f5e9',
-                                        color: p.payment_mode === 'upi' ? '#1565c0' : '#2e7d32'
-                                      }}>
-                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                          {p.payment_mode === 'upi'
-                                            ? <><Smartphone size={11} /> {p.upi_account || 'UPI'}</>
-                                            : <><Banknote size={11} /> Cash</>}
-                                        </span>
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                              {orderDetail.cheques && orderDetail.cheques.map((c) => (
-                                <tr key={`cheque-${c.id}`} style={{ backgroundColor: '#f5f0ff' }}>
-                                  <td style={styles.innerTd}><Receipt size={14} /></td>
-                                  <td style={styles.innerTd}>
-                                    {c.received_date
-                                      ? new Date(c.received_date).toLocaleDateString('en-GB').replace(/\//g, '.')
-                                      : '—'}
-                                  </td>
-                                  <td style={styles.innerTd}><strong>₹{c.amount}</strong></td>
-                                  <td style={styles.innerTd}>
-                                    {c.notes || 'Cheque Payment'}
-                                    {c.cheque_number && <span style={{ fontSize: '11px', color: '#888' }}> #{c.cheque_number}</span>}
-                                    {c.bank_name && <span style={{ fontSize: '11px', color: '#888' }}> ({c.bank_name})</span>}
-                                    <span style={{
-                                      ...styles.advanceBadge,
-                                      marginLeft: '6px',
-                                      backgroundColor:
-                                        c.status === 'cleared' ? '#e8f5e9'
-                                        : c.status === 'bounced' ? '#fdecea'
-                                        : '#fff3cd',
-                                      color:
-                                        c.status === 'cleared' ? '#2e7d32'
-                                        : c.status === 'bounced' ? '#c0392b'
-                                        : '#856404'
-                                    }}>
-                                      <Receipt size={11} style={{ marginRight: '3px', verticalAlign: 'middle' }} />
-                                      {c.status === 'cleared' ? 'Cleared'
-                                        : c.status === 'bounced' ? 'Bounced'
-                                        : 'Awaiting Clearance'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                              {orderDetail.discount_amount > 0 && (
-                                <tr style={{ backgroundColor: '#fff8e1' }}>
-                                  <td colSpan="2" style={{ ...styles.innerTd, fontWeight: 'bold', color: '#e67e22', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                    <Scissors size={13} /> Discount {orderDetail.discount_note ? `(${orderDetail.discount_note})` : '(Round-off)'}
-                                  </td>
-                                  <td colSpan="2" style={{ ...styles.innerTd, fontWeight: 'bold', color: '#e67e22' }}>
-                                    - ₹{orderDetail.discount_amount}
-                                  </td>
-                                </tr>
-                              )}
-                              <tr style={{ backgroundColor: '#f0fff4' }}>
-                                <td colSpan="2" style={{ ...styles.innerTd, fontWeight: 'bold' }}>Balance Due</td>
-                                <td colSpan="2" style={{
-                                  ...styles.innerTd, fontWeight: 'bold', fontSize: '16px',
-                                  color: orderDetail.balance_due > 0 ? '#e74c3c' : '#27ae60'
-                                }}>
-                                  ₹{orderDetail.balance_due}
-                                  {orderDetail.follow_up_date && (
-                                    <span style={{ fontSize: '12px', color: '#888', marginLeft: '10px' }}>
-                                      Follow-up: {orderDetail.follow_up_date}
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            </tbody>
-                          </table>
+                              </TBody>
+                            </Table>
                           </div>
 
-                          {orderDetail.balance_due > 0 && (
-                            <form onSubmit={handleAddPayment} style={styles.paymentForm}>
-                              <h5 style={{ marginBottom: '8px', color: '#555' }}>+ Record New Payment</h5>
+                          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
+                            <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5" /> Payment History</h4>
+                            <Table minWidth="500px">
+                              <THead>
+                                <Th>#</Th>
+                                <Th>Date</Th>
+                                <Th>Amount</Th>
+                                <Th>Note</Th>
+                              </THead>
+                              <TBody>
+                                {orderDetail.advance_paid > 0 && (
+                                  <tr className="bg-amber-500/5">
+                                    <td className="py-3 pr-4 text-slate-300">1</td>
+                                    <td className="py-3 pr-4 text-slate-300">
+                                      {orderDetail.created_at ? (() => {
+                                        const d = new Date(orderDetail.advance_payment_date || orderDetail.created_at)
+                                        const date = d.toLocaleDateString('en-GB').replace(/\//g, '.')
+                                        const time = d.toLocaleTimeString('en-GB', { hour12: false })
+                                        return <span>{time}<br /><span className="text-[11px] text-slate-500">{date}</span></span>
+                                      })() : '—'}
+                                    </td>
+                                    <td className="py-3 pr-4 font-bold text-white">₹{orderDetail.advance_paid}</td>
+                                    <td className="py-3 pr-4">
+                                      <Badge tone="amber">Advance</Badge>
+                                      {orderDetail.advance_payment_mode && (
+                                        <Badge tone={orderDetail.advance_payment_mode === 'upi' ? 'blue' : 'emerald'} className="ml-1.5">
+                                          {orderDetail.advance_payment_mode === 'upi' ? <><Smartphone className="w-2.5 h-2.5" /> UPI</> : <><Banknote className="w-2.5 h-2.5" /> Cash</>}
+                                        </Badge>
+                                      )}
+                                    </td>
+                                  </tr>
+                                )}
+                                {orderDetail.payments && orderDetail.payments.map((p, i) => (
+                                  <tr key={p.id} className="border-t border-slate-800/60">
+                                    <td className="py-3 pr-4 text-slate-300">{(orderDetail.advance_paid > 0 ? 2 : 1) + i}</td>
+                                    <td className="py-3 pr-4 text-slate-300">
+                                      {(p.created_at || p.payment_date) ? (() => {
+                                        const d = new Date(p.created_at || p.payment_date)
+                                        if (isNaN(d)) return p.created_at || p.payment_date
+                                        const date = d.toLocaleDateString('en-GB').replace(/\//g, '.')
+                                        const time = d.toLocaleTimeString('en-GB', { hour12: false })
+                                        return <span>{time}<br /><span className="text-[11px] text-slate-500">{date}</span></span>
+                                      })() : '—'}
+                                    </td>
+                                    <td className="py-3 pr-4 font-bold text-white">₹{p.amount}</td>
+                                    <td className="py-3 pr-4 text-slate-300">
+                                      {p.note || '—'}
+                                      {p.payment_mode && (
+                                        <Badge tone={p.payment_mode === 'upi' ? 'blue' : 'emerald'} className="ml-1.5">
+                                          {p.payment_mode === 'upi' ? <><Smartphone className="w-2.5 h-2.5" /> {p.upi_account || 'UPI'}</> : <><Banknote className="w-2.5 h-2.5" /> Cash</>}
+                                        </Badge>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                                {orderDetail.cheques && orderDetail.cheques.map((c) => (
+                                  <tr key={`cheque-${c.id}`} className="bg-indigo-500/5 border-t border-slate-800/60">
+                                    <td className="py-3 pr-4 text-slate-400"><Receipt className="w-3.5 h-3.5" /></td>
+                                    <td className="py-3 pr-4 text-slate-300">
+                                      {c.received_date ? new Date(c.received_date).toLocaleDateString('en-GB').replace(/\//g, '.') : '—'}
+                                    </td>
+                                    <td className="py-3 pr-4 font-bold text-white">₹{c.amount}</td>
+                                    <td className="py-3 pr-4 text-slate-300">
+                                      {c.notes || 'Cheque Payment'}
+                                      {c.cheque_number && <span className="text-[11px] text-slate-500"> #{c.cheque_number}</span>}
+                                      {c.bank_name && <span className="text-[11px] text-slate-500"> ({c.bank_name})</span>}
+                                      <Badge tone={c.status === 'cleared' ? 'emerald' : c.status === 'bounced' ? 'red' : 'amber'} className="ml-1.5">
+                                        <Receipt className="w-2.5 h-2.5" />
+                                        {c.status === 'cleared' ? 'Cleared' : c.status === 'bounced' ? 'Bounced' : 'Awaiting Clearance'}
+                                      </Badge>
+                                    </td>
+                                  </tr>
+                                ))}
+                                {orderDetail.discount_amount > 0 && (
+                                  <tr className="bg-orange-500/5 border-t border-slate-800/60">
+                                    <td colSpan="2" className="py-3 pr-4 font-bold text-orange-400 flex items-center gap-1.5">
+                                      <Scissors className="w-3.5 h-3.5" /> Discount {orderDetail.discount_note ? `(${orderDetail.discount_note})` : '(Round-off)'}
+                                    </td>
+                                    <td colSpan="2" className="py-3 pr-4 font-bold text-orange-400">- ₹{orderDetail.discount_amount}</td>
+                                  </tr>
+                                )}
+                                <tr className="bg-emerald-500/5 border-t border-slate-800">
+                                  <td colSpan="2" className="py-3 pr-4 font-bold text-slate-200">Balance Due</td>
+                                  <td colSpan="2" className={`py-3 pr-4 font-bold text-base ${orderDetail.balance_due > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                    ₹{orderDetail.balance_due}
+                                    {orderDetail.follow_up_date && (
+                                      <span className="text-xs text-slate-500 ml-2.5 font-normal">Follow-up: {orderDetail.follow_up_date}</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              </TBody>
+                            </Table>
 
-                              <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <label style={{ fontSize: '13px', color: '#888' }}>
-                                  Kuch amount discount karna hai?
-                                </label>
-                                <button
-                                  type="button"
-                                  onClick={() => setPaymentForm(f => ({ ...f, showDiscount: !f.showDiscount, discount_amount: '', discount_note: '' }))}
-                                  style={{
-                                    padding: '4px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer',
-                                    backgroundColor: paymentForm.showDiscount ? '#e67e22' : '#f0f0f0',
-                                    color: paymentForm.showDiscount ? '#fff' : '#333',
-                                    border: '1px solid #ddd',
-                                    display: 'inline-flex', alignItems: 'center', gap: '5px'
-                                  }}
-                                >
-                                  <Scissors size={12} /> {paymentForm.showDiscount ? 'Discount ON' : 'Discount OFF'}
-                                </button>
-                              </div>
+                            {orderDetail.balance_due > 0 && (
+                              <form onSubmit={handleAddPayment} className="mt-3 pt-3 border-t border-slate-800">
+                                <h5 className="text-slate-300 text-sm font-semibold mb-2.5">+ Record New Payment</h5>
 
-                              {paymentForm.showDiscount && (
-                                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center', backgroundColor: '#fff8e1', padding: '10px', borderRadius: '8px' }}>
-                                  <span style={{ fontSize: '13px', color: '#e67e22', fontWeight: 'bold', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '4px' }}><Scissors size={12} /> Discount:</span>
-                                  <input
-                                    style={{ ...styles.input, maxWidth: '130px' }}
-                                    type="number" placeholder="Amount ₹"
-                                    value={paymentForm.discount_amount || ''}
-                                    onChange={e => setPaymentForm({ ...paymentForm, discount_amount: e.target.value })}
-                                  />
-                                  <input
-                                    style={{ ...styles.input, flex: 2 }}
-                                    placeholder="Note (e.g. round-off, 15 rs maafi)"
-                                    value={paymentForm.discount_note || ''}
-                                    onChange={e => setPaymentForm({ ...paymentForm, discount_note: e.target.value })}
-                                  />
-                                  <span style={{ fontSize: '13px', color: '#888', whiteSpace: 'nowrap' }}>
-                                    Remaining: ₹{Math.max(0, orderDetail.balance_due - (parseFloat(paymentForm.discount_amount) || 0) - (parseFloat(paymentForm.amount) || 0))}
-                                  </span>
+                                <div className="mb-2.5 flex items-center gap-2.5">
+                                  <label className="text-xs text-slate-400">Kuch amount discount karna hai?</label>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPaymentForm(f => ({ ...f, showDiscount: !f.showDiscount, discount_amount: '', discount_note: '' }))}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                                      paymentForm.showDiscount ? 'bg-orange-500/20 border-orange-500/40 text-orange-400' : 'bg-slate-800 border-slate-700 text-slate-300'
+                                    }`}
+                                  >
+                                    <Scissors className="w-3 h-3" /> {paymentForm.showDiscount ? 'Discount ON' : 'Discount OFF'}
+                                  </button>
                                 </div>
-                              )}
 
-                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                                <div>
-                                  <input
-                                    style={{
-                                      ...styles.input, maxWidth: '150px',
-                                      ...(paymentAmountLocked ? { backgroundColor: '#f0f0f0', cursor: 'not-allowed' } : {})
-                                    }}
-                                    type="number" placeholder="Amount ₹"
-                                    value={paymentForm.amount}
-                                    onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                                    readOnly={paymentAmountLocked}
-                                  />
-                                  {paymentAmountLocked && (
-                                    <div style={{ fontSize: '10px', color: '#888', marginTop: '2px' }}>
-                                      Denomination counter se bharo
-                                    </div>
-                                  )}
-                                </div>
-                                <input
-                                  style={{ ...styles.input, maxWidth: '160px' }}
-                                  type="date"
-                                  value={paymentForm.payment_date}
-                                  onChange={e => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
-                                />
-                                <input
-                                  style={{ ...styles.input, flex: 2 }}
-                                  placeholder="Note (e.g. final payment)"
-                                  value={paymentForm.note}
-                                  onChange={e => setPaymentForm({ ...paymentForm, note: e.target.value })}
-                                />
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                  <label style={{ fontSize: '11px', color: '#888' }}>Payment Mode</label>
-                                  <div style={{ display: 'flex', gap: '6px' }}>
-                                    <button
-                                      type="button"
-                                      onClick={() => setPaymentForm(f => ({ ...f, payment_mode: 'cash', upi_account: '', cheque_number: '', bank_name: '' }))}
-                                      style={{
-                                        padding: '8px 14px', borderRadius: '6px', border: '1px solid #ddd',
-                                        backgroundColor: paymentForm.payment_mode === 'cash' ? '#27ae60' : '#fff',
-                                        color: paymentForm.payment_mode === 'cash' ? '#fff' : '#333',
-                                        cursor: 'pointer', fontSize: '13px', fontWeight: '500'
-                                      }}
-                                    ><Banknote size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Cash</button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setPaymentForm(f => ({ ...f, payment_mode: 'upi', cheque_number: '', bank_name: '' }))}
-                                      style={{
-                                        padding: '8px 14px', borderRadius: '6px', border: '1px solid #ddd',
-                                        backgroundColor: paymentForm.payment_mode === 'upi' ? '#1565c0' : '#fff',
-                                        color: paymentForm.payment_mode === 'upi' ? '#fff' : '#333',
-                                        cursor: 'pointer', fontSize: '13px', fontWeight: '500'
-                                      }}
-                                    ><Smartphone size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />UPI</button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setPaymentForm(f => ({ ...f, payment_mode: 'cheque', upi_account: '' }))}
-                                      style={{
-                                        padding: '8px 14px', borderRadius: '6px', border: '1px solid #ddd',
-                                        backgroundColor: paymentForm.payment_mode === 'cheque' ? '#8e44ad' : '#fff',
-                                        color: paymentForm.payment_mode === 'cheque' ? '#fff' : '#333',
-                                        cursor: 'pointer', fontSize: '13px', fontWeight: '500'
-                                      }}
-                                    ><Receipt size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Cheque</button>
+                                {paymentForm.showDiscount && (
+                                  <div className="flex gap-2 mb-2.5 items-center bg-orange-500/10 border border-orange-500/20 p-2.5 rounded-xl flex-wrap">
+                                    <span className="text-xs text-orange-400 font-bold flex items-center gap-1 whitespace-nowrap"><Scissors className="w-3 h-3" /> Discount:</span>
+                                    <input
+                                      className={`${inputClasses} max-w-[130px]`}
+                                      type="number" placeholder="Amount ₹"
+                                      value={paymentForm.discount_amount || ''}
+                                      onChange={e => setPaymentForm({ ...paymentForm, discount_amount: e.target.value })}
+                                    />
+                                    <input
+                                      className={`${inputClasses} flex-[2]`}
+                                      placeholder="Note (e.g. round-off, 15 rs maafi)"
+                                      value={paymentForm.discount_note || ''}
+                                      onChange={e => setPaymentForm({ ...paymentForm, discount_note: e.target.value })}
+                                    />
+                                    <span className="text-xs text-slate-500 whitespace-nowrap">
+                                      Remaining: ₹{Math.max(0, orderDetail.balance_due - (parseFloat(paymentForm.discount_amount) || 0) - (parseFloat(paymentForm.amount) || 0))}
+                                    </span>
                                   </div>
-                                </div>
+                                )}
 
-                                {paymentForm.payment_mode === 'cash' && noteTrackingEnabled && (
-                                  <div style={{ flexBasis: '100%' }}>
-                                    <DenominationCounter
-                                      availableNotes={availableNotes}
-                                      onApply={(total, counts) => {
-                                        setPaymentForm(f => ({ ...f, amount: String(total) }))
-                                        setPaymentDenomination(counts)
-                                      }}
+                                <div className="flex gap-2 flex-wrap items-end">
+                                  <div>
+                                    <input
+                                      className={`${inputClasses} max-w-[150px]`}
+                                      type="number" placeholder="Amount ₹"
+                                      value={paymentForm.amount}
+                                      onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                                      readOnly={paymentAmountLocked}
+                                    />
+                                    {paymentAmountLocked && (
+                                      <div className="text-[10px] text-slate-500 mt-1">Denomination counter se bharo</div>
+                                    )}
+                                  </div>
+                                  <input
+                                    className={`${inputClasses} max-w-[160px]`}
+                                    type="date"
+                                    value={paymentForm.payment_date}
+                                    onChange={e => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
+                                  />
+                                  <input
+                                    className={`${inputClasses} flex-[2]`}
+                                    placeholder="Note (e.g. final payment)"
+                                    value={paymentForm.note}
+                                    onChange={e => setPaymentForm({ ...paymentForm, note: e.target.value })}
+                                  />
+                                  <div className="flex flex-col gap-1">
+                                    <label className="text-[11px] text-slate-400">Payment Mode</label>
+                                    <PaymentModeButtons
+                                      value={paymentForm.payment_mode}
+                                      options={['cash', 'upi', 'cheque']}
+                                      onChange={mode => setPaymentForm(f => ({
+                                        ...f, payment_mode: mode,
+                                        upi_account: mode === 'upi' ? f.upi_account : '',
+                                        cheque_number: mode === 'cheque' ? f.cheque_number : '',
+                                        bank_name: mode === 'cheque' ? f.bank_name : ''
+                                      }))}
                                     />
                                   </div>
-                                )}
 
-                                {paymentForm.payment_mode === 'upi' && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <label style={{ fontSize: '11px', color: '#888' }}>UPI Account *</label>
-                                    <select
-                                      style={{ ...styles.input, minWidth: '200px' }}
-                                      value={paymentForm.upi_account}
-                                      onChange={e => setPaymentForm({ ...paymentForm, upi_account: e.target.value })}
-                                      required
-                                    >
-                                      <option value="">Select Account</option>
-                                      {UPI_ACCOUNTS.map(acc => (
-                                        <option key={acc} value={acc}>{acc}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                )}
-
-                                {paymentForm.payment_mode === 'cheque' && (
-                                  <>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                      <label style={{ fontSize: '11px', color: '#888' }}>Cheque Number</label>
-                                      <input
-                                        style={{ ...styles.input, maxWidth: '140px' }}
-                                        placeholder="e.g. 004521"
-                                        value={paymentForm.cheque_number}
-                                        onChange={e => setPaymentForm({ ...paymentForm, cheque_number: e.target.value })}
+                                  {paymentForm.payment_mode === 'cash' && noteTrackingEnabled && (
+                                    <div className="basis-full">
+                                      <DenominationCounter
+                                        availableNotes={availableNotes}
+                                        onApply={(total, counts) => {
+                                          setPaymentForm(f => ({ ...f, amount: String(total) }))
+                                          setPaymentDenomination(counts)
+                                        }}
                                       />
-                                    </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                      <label style={{ fontSize: '11px', color: '#888' }}>Bank Name</label>
-                                      <input
-                                        style={{ ...styles.input, maxWidth: '160px' }}
-                                        placeholder="e.g. SBI, BOI"
-                                        value={paymentForm.bank_name}
-                                        onChange={e => setPaymentForm({ ...paymentForm, bank_name: e.target.value })}
-                                      />
-                                    </div>
-                                  </>
-                                )}
-
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                  <label style={{ fontSize: '11px', color: '#888' }}>Next Follow-up</label>
-                                  <input
-                                    style={{ ...styles.input, maxWidth: '160px' }}
-                                    type="date"
-                                    value={paymentForm.follow_up_date || ''}
-                                    onChange={e => setPaymentForm({ ...paymentForm, follow_up_date: e.target.value })}
-                                  />
-                                </div>
-
-                                <LoadingButton loading={paymentSubmitting} type="submit" style={styles.submitBtn}>Save Payment</LoadingButton>
-                              </div>
-                            </form>
-                          )}
-                        </div>
-
-                        {orderDetail.notes && (
-                          <div style={styles.detailSection}>
-                            <h4 style={{ ...styles.detailTitle, display: 'flex', alignItems: 'center', gap: '6px' }}><StickyNote size={15} /> Notes</h4>
-                            <p style={{ fontSize: '14px', color: '#555' }}>{orderDetail.notes}</p>
-                          </div>
-                        )}
-
-                        {/* ACTIVITY LOG */}
-                        {orderDetail.activityLog && orderDetail.activityLog.length > 0 && (
-                          <div style={styles.detailSection}>
-                            <h4 style={{ ...styles.detailTitle, display: 'flex', alignItems: 'center', gap: '6px' }}><ClipboardList size={15} /> Activity Log</h4>
-                            {orderDetail.activityLog.map(a => (
-                              <div key={a.id} style={{
-                                fontSize: '12px', color: '#555',
-                                padding: '8px 12px', backgroundColor: '#f0f7ff',
-                                borderRadius: '6px', marginBottom: '6px',
-                                borderLeft: '3px solid #3498db'
-                              }}>
-                                {a.activity}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* ORDER PHOTOS */}
-                        <div style={styles.detailSection}>
-                          <h4 style={{ ...styles.detailTitle, display: 'flex', alignItems: 'center', gap: '6px' }}><Camera size={15} /> Order Photos</h4>
-                          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
-                            <input
-                              type="text"
-                              placeholder="Caption (optional)"
-                              value={photoCaption}
-                              onChange={e => setPhotoCaption(e.target.value)}
-                              style={{ ...styles.input, maxWidth: '200px' }}
-                            />
-                            <label style={{
-                              backgroundColor: '#1a1a2e', color: '#fff', padding: '8px 16px',
-                              borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500',
-                              opacity: photoUploading ? 0.6 : 1, whiteSpace: 'nowrap'
-                            }}>
-                              {photoUploading ? 'Uploading...' : <><Paperclip size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Add Photo</>}
-                              <input
-                                type="file"
-                                accept="image/*"
-                                capture="environment"
-                                onChange={handlePhotoUpload}
-                                disabled={photoUploading}
-                                style={{ display: 'none' }}
-                              />
-                            </label>
-                          </div>
-                          {orderPhotos.length === 0 ? (
-                            <p style={{ color: '#aaa', fontSize: '13px' }}>Koi photo nahi — upar se add karo.</p>
-                          ) : (
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '10px' }}>
-                              {orderPhotos.map(p => (
-                                <div key={p.id} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid #eee' }}>
-                                  <img
-                                    src={`http://localhost:5000/${p.photo_path}`}
-                                    alt={p.caption || 'Order photo'}
-                                    style={{ width: '100%', height: '100px', objectFit: 'cover', cursor: 'pointer', display: 'block' }}
-                                    onClick={() => setLightboxPhoto(p)}
-                                  />
-                                  {p.caption && (
-                                    <div style={{ fontSize: '11px', color: '#555', padding: '4px 6px', backgroundColor: '#f9f9f9' }}>
-                                      {p.caption}
                                     </div>
                                   )}
-                                  <button
-                                    onClick={() => handlePhotoDelete(p.id)}
-                                    style={{
-                                      position: 'absolute', top: '4px', right: '4px',
-                                      backgroundColor: 'rgba(0,0,0,0.55)', color: '#fff',
-                                      border: 'none', borderRadius: '50%', width: '22px', height: '22px',
-                                      fontSize: '12px', cursor: 'pointer', lineHeight: 1,
-                                      display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                    }}
-                                  ><X size={12} /></button>
+
+                                  {paymentForm.payment_mode === 'upi' && (
+                                    <div className="flex flex-col gap-1">
+                                      <label className="text-[11px] text-slate-400">UPI Account *</label>
+                                      <select
+                                        className={`${inputClasses} min-w-[200px]`}
+                                        value={paymentForm.upi_account}
+                                        onChange={e => setPaymentForm({ ...paymentForm, upi_account: e.target.value })}
+                                        required
+                                      >
+                                        <option value="">Select Account</option>
+                                        {UPI_ACCOUNTS.map(acc => (
+                                          <option key={acc} value={acc}>{acc}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
+
+                                  {paymentForm.payment_mode === 'cheque' && (
+                                    <>
+                                      <div className="flex flex-col gap-1">
+                                        <label className="text-[11px] text-slate-400">Cheque Number</label>
+                                        <input
+                                          className={`${inputClasses} max-w-[140px]`}
+                                          placeholder="e.g. 004521"
+                                          value={paymentForm.cheque_number}
+                                          onChange={e => setPaymentForm({ ...paymentForm, cheque_number: e.target.value })}
+                                        />
+                                      </div>
+                                      <div className="flex flex-col gap-1">
+                                        <label className="text-[11px] text-slate-400">Bank Name</label>
+                                        <input
+                                          className={`${inputClasses} max-w-[160px]`}
+                                          placeholder="e.g. SBI, BOI"
+                                          value={paymentForm.bank_name}
+                                          onChange={e => setPaymentForm({ ...paymentForm, bank_name: e.target.value })}
+                                        />
+                                      </div>
+                                    </>
+                                  )}
+
+                                  <div className="flex flex-col gap-1">
+                                    <label className="text-[11px] text-slate-400">Next Follow-up</label>
+                                    <input
+                                      className={`${inputClasses} max-w-[160px]`}
+                                      type="date"
+                                      value={paymentForm.follow_up_date || ''}
+                                      onChange={e => setPaymentForm({ ...paymentForm, follow_up_date: e.target.value })}
+                                    />
+                                  </div>
+
+                                  <LoadingButton
+                                    loading={paymentSubmitting}
+                                    type="submit"
+                                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25"
+                                  >
+                                    Save Payment
+                                  </LoadingButton>
+                                </div>
+                              </form>
+                            )}
+                          </div>
+
+                          {orderDetail.notes && (
+                            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
+                              <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-1.5"><StickyNote className="w-3.5 h-3.5" /> Notes</h4>
+                              <p className="text-sm text-slate-300">{orderDetail.notes}</p>
+                            </div>
+                          )}
+
+                          {orderDetail.activityLog && orderDetail.activityLog.length > 0 && (
+                            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
+                              <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-1.5"><ClipboardList className="w-3.5 h-3.5" /> Activity Log</h4>
+                              {orderDetail.activityLog.map(a => (
+                                <div key={a.id} className="text-xs text-slate-300 px-3 py-2 bg-blue-500/5 rounded-lg mb-1.5 border-l-2 border-blue-500/40">
+                                  {a.activity}
                                 </div>
                               ))}
                             </div>
                           )}
+
+                          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
+                            <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-1.5"><Camera className="w-3.5 h-3.5" /> Order Photos</h4>
+                            <div className="flex gap-2.5 items-center mb-4 flex-wrap">
+                              <input
+                                type="text"
+                                placeholder="Caption (optional)"
+                                value={photoCaption}
+                                onChange={e => setPhotoCaption(e.target.value)}
+                                className={`${inputClasses} max-w-[200px]`}
+                              />
+                              <label className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold bg-blue-600 text-white cursor-pointer whitespace-nowrap ${photoUploading ? 'opacity-60' : ''}`}>
+                                {photoUploading ? 'Uploading...' : <><Paperclip className="w-3.5 h-3.5" /> Add Photo</>}
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  capture="environment"
+                                  onChange={handlePhotoUpload}
+                                  disabled={photoUploading}
+                                  className="hidden"
+                                />
+                              </label>
+                            </div>
+                            {orderPhotos.length === 0 ? (
+                              <p className="text-slate-500 text-sm">Koi photo nahi — upar se add karo.</p>
+                            ) : (
+                              <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))' }}>
+                                {orderPhotos.map(p => (
+                                  <div key={p.id} className="relative rounded-xl overflow-hidden border border-slate-800">
+                                    <img
+                                      src={`http://localhost:5000/${p.photo_path}`}
+                                      alt={p.caption || 'Order photo'}
+                                      className="w-full h-[100px] object-cover cursor-pointer block"
+                                      onClick={() => setLightboxPhoto(p)}
+                                    />
+                                    {p.caption && (
+                                      <div className="text-[11px] text-slate-300 px-1.5 py-1 bg-slate-800">{p.caption}</div>
+                                    )}
+                                    <button
+                                      onClick={() => handlePhotoDelete(p.id)}
+                                      className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-[22px] h-[22px] flex items-center justify-center hover:bg-black/80"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </>
-            ))}
-          </tbody>
-        </table>
-        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </TBody>
+          </Table>
+
+          <div className="px-4 py-3 bg-slate-950/40 border-t border-slate-800 text-xs text-slate-400 flex items-center justify-between">
+            <span>Showing {filteredOrders.length} of {orders.length} orders</span>
+          </div>
+        </Card>
       )}
 
       {/* WA SEND MODAL */}
-      {waSendModal && (
-        <div
-          onClick={() => setWaSendModal(null)}
-          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '28px', width: '380px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}
-          >
-            <h3 style={{ marginBottom: '6px', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}><Smartphone size={16} /> WhatsApp Bill</h3>
-            <p style={{ fontSize: '13px', color: '#888', marginBottom: '20px' }}>
-              {waSendModal.firm_name} — Bill #{waSendModal.order_number || waSendModal.id}
-            </p>
+      <Modal open={!!waSendModal} onClose={() => setWaSendModal(null)} width="380px">
+        {waSendModal && (
+          <>
+            <h3 className="text-white font-bold flex items-center gap-2 mb-1.5"><Smartphone className="w-4 h-4" /> WhatsApp Bill</h3>
+            <p className="text-xs text-slate-400 mb-4">{waSendModal.firm_name} — Bill #{waSendModal.order_number || waSendModal.id}</p>
 
             {waSendModal.balance_due > 0 ? (
               <>
-                <p style={{ fontSize: '13px', color: '#e74c3c', marginBottom: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <AlertTriangle size={14} /> Balance Due: ₹{waSendModal.balance_due}
+                <p className="text-xs text-red-400 font-bold mb-3 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" /> Balance Due: ₹{waSendModal.balance_due}
                 </p>
-                <label style={{ fontSize: '13px', color: '#555', display: 'block', marginBottom: '6px' }}>
-                  UPI QR bhejna hai? Account select karo:
-                </label>
+                <label className="text-xs text-slate-400 block mb-1.5">UPI QR bhejna hai? Account select karo:</label>
                 <select
                   value={selectedUpiForWA}
                   onChange={e => setSelectedUpiForWA(e.target.value)}
-                  style={{ ...styles.input, marginBottom: '20px' }}
+                  className={`${inputClasses} mb-5`}
                 >
                   <option value="">QR mat bhejo</option>
                   {[
@@ -1567,18 +1436,13 @@ function Orders() {
                 </select>
               </>
             ) : (
-              <p style={{ fontSize: '13px', color: '#27ae60', marginBottom: '20px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <CheckCircle2 size={15} /> Fully Paid — QR nahi bheja jayega
+              <p className="text-xs text-emerald-400 font-bold mb-5 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Fully Paid — QR nahi bheja jayega
               </p>
             )}
 
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => setWaSendModal(null)}
-                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ddd', backgroundColor: '#fff', cursor: 'pointer', fontSize: '14px' }}
-              >
-                Cancel
-              </button>
+            <div className="flex gap-2.5">
+              <SecondaryButton className="flex-1 justify-center py-2.5" onClick={() => setWaSendModal(null)}>Cancel</SecondaryButton>
               <LoadingButton
                 loading={waSending}
                 onClick={() => {
@@ -1589,101 +1453,40 @@ function Orders() {
                     .catch(err => { setMessage('WhatsApp error: ' + (err.response?.data?.error || 'Not connected')); setWaSendModal(null) })
                     .finally(() => setWaSending(false))
                 }}
-                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: 'none', backgroundColor: '#25D366', color: '#fff', fontSize: '14px', fontWeight: 'bold' }}
+                className="flex-1 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white text-sm font-bold"
               >
-                <Send size={14} /> Send
+                <Send className="w-3.5 h-3.5" /> Send
               </LoadingButton>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
 
       {/* LIGHTBOX */}
       {lightboxPhoto && (
         <div
           onClick={() => setLightboxPhoto(null)}
-          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.88)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 1000, cursor: 'pointer' }}
+          className="fixed inset-0 bg-black/90 flex flex-col items-center justify-center z-[1000] cursor-pointer p-4"
         >
           <img
             src={`http://localhost:5000/${lightboxPhoto.photo_path}`}
             alt={lightboxPhoto.caption || 'Order photo'}
-            style={{ maxWidth: '92%', maxHeight: '82%', borderRadius: '8px', cursor: 'default' }}
+            className="max-w-[92%] max-h-[82%] rounded-xl cursor-default"
             onClick={e => e.stopPropagation()}
           />
           {lightboxPhoto.caption && (
-            <p style={{ color: '#ddd', fontSize: '14px', marginTop: '12px' }}>{lightboxPhoto.caption}</p>
+            <p className="text-slate-300 text-sm mt-3">{lightboxPhoto.caption}</p>
           )}
           <button
             onClick={() => setLightboxPhoto(null)}
-            style={{ position: 'absolute', top: '20px', right: '28px', background: 'transparent', border: 'none', color: '#fff', fontSize: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-          ><X size={28} /></button>
+            className="absolute top-5 right-7 text-white hover:text-slate-300"
+          >
+            <X className="w-8 h-8" />
+          </button>
         </div>
       )}
     </div>
   )
-}
-
-function statusColor(status) {
-  const colors = { pending: '#f39c12', in_progress: '#3498db', ready: '#27ae60', delivered: '#95a5a6' }
-  return colors[status] || '#ccc'
-}
-
-const styles = {
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-  addBtn: { backgroundColor: '#1a1a2e', color: '#fff', border: '1px solid #1a1a2e', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' },
-  message: { backgroundColor: '#e8f5e9', color: '#2e7d32', padding: '10px 16px', borderRadius: '6px', marginBottom: '16px', cursor: 'pointer' },
-  formBox: { backgroundColor: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', boxSizing: 'border-box', maxWidth: '100%', overflowX: 'hidden' },
-  formRow: { display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' },
-  input: { padding: '10px 14px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', flex: '1', minWidth: '120px', boxSizing: 'border-box' },
-  label: { fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' },
-  toggleBtn: { padding: '8px 12px', borderRadius: '6px', border: '1px solid #ddd', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap' },
-  removeBtn: { width: '32px', height: '32px', backgroundColor: '#fee', color: '#e74c3c', border: '1px solid #e74c3c', borderRadius: '4px', cursor: 'pointer', fontSize: '14px' },
-  deleteBtn: { backgroundColor: '#800000', color: '#fff', border: '1px solid #800000', padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
-  addItemBtn: { backgroundColor: '#f0f0f0', border: '1px solid #ddd', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', marginTop: '4px' },
-  totalsBox: { backgroundColor: '#f8f8f8', padding: '16px', borderRadius: '8px', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '460px', width: '100%', boxSizing: 'border-box' },
-  totalRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '15px', flexWrap: 'wrap', gap: '8px' },
-  submitBtn: { backgroundColor: '#1a1a2e', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' },
-  searchRow: { display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' },
-  searchInput: { padding: '10px 16px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px', width: '340px', maxWidth: '100%', boxSizing: 'border-box' },
-  clearSearchBtn: { backgroundColor: '#fff', border: '1px solid #ddd', color: '#888', padding: '8px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' },
-  filterDropdownBtn: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '9px 14px', borderRadius: '8px', border: '1px solid #ddd', backgroundColor: '#fff', color: '#555', cursor: 'pointer', fontSize: '13px', fontWeight: '500', textTransform: 'capitalize', whiteSpace: 'nowrap' },
-  filterDropdownBtnActive: { border: '1px solid #1a1a2e', color: '#1a1a2e' },
-  filterMenuBackdrop: { position: 'fixed', inset: 0, zIndex: 90 },
-  filterMenu: { position: 'absolute', top: 'calc(100% + 6px)', left: 0, backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', border: '1px solid #eee', zIndex: 100, minWidth: '160px', overflow: 'hidden' },
-  filterMenuItem: { display: 'block', width: '100%', textAlign: 'left', padding: '10px 16px', border: 'none', backgroundColor: '#fff', cursor: 'pointer', fontSize: '13px', color: '#333', textTransform: 'capitalize' },
-  filterMenuItemActive: { backgroundColor: '#1a1a2e', color: '#fff', fontWeight: 'bold' },
-  table: { width: '100%', minWidth: '900px', borderCollapse: 'collapse', backgroundColor: '#fff', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-  tableScroll: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
-  th: { padding: '12px 16px', textAlign: 'left', backgroundColor: '#f8f8f8', fontSize: '13px', color: '#555', borderBottom: '1px solid #eee' },
-  td: { padding: '12px 16px', fontSize: '14px', borderBottom: '1px solid #f0f0f0' },
-  tr: { backgroundColor: '#fff' },
-  statusSelect: { border: 'none', padding: '5px 10px', borderRadius: '12px', color: '#fff', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold' },
-  editBtn: { backgroundColor: '#fff', color: '#1a1a2e', border: '1px solid #1a1a2e', padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
-  detailBtn: { backgroundColor: '#fff', color: '#1a1a2e', border: '1px solid #1a1a2e', padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
-  detailCell: { padding: '0', backgroundColor: '#f0f7ff', borderBottom: '2px solid #ddd' },
-  detailBox: { padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' },
-  detailSection: { backgroundColor: '#fff', padding: '16px', borderRadius: '8px' },
-  detailTitle: { marginBottom: '10px', fontSize: '14px', color: '#333' },
-  innerTable: { width: '100%', minWidth: '500px', borderCollapse: 'collapse', fontSize: '13px' },
-  innerTh: { padding: '8px 12px', backgroundColor: '#f8f8f8', textAlign: 'left', borderBottom: '1px solid #eee', color: '#666' },
-  innerTd: { padding: '8px 12px', borderBottom: '1px solid #f0f0f0' },
-  advanceBadge: { backgroundColor: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: '10px', fontSize: '11px' },
-  paymentForm: { marginTop: '12px', padding: '12px', backgroundColor: '#f9f9f9', borderRadius: '8px' },
-  modeBtn: { padding: '8px 16px', borderRadius: '6px', border: '1px solid #ddd', backgroundColor: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '500' },
-  modeBtnActive: { backgroundColor: '#1a1a2e', color: '#fff', border: '1px solid #1a1a2e' },
-  requiredDot: { color: '#e74c3c', fontSize: '16px', lineHeight: 1 },
-  // ── NEW: order number badge style ──
-  orderNumberBadge: {
-    display: 'inline-block',
-    backgroundColor: '#1a1a2e',
-    color: '#fff',
-    padding: '3px 10px',
-    borderRadius: '12px',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    letterSpacing: '0.5px',
-    fontFamily: 'monospace'
-  }
 }
 
 export default Orders

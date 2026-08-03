@@ -3,15 +3,22 @@ import PageLock from '../components/PageLock'
 import {
   getEmployees, createEmployee, markAttendance,
   getSalary, getAttendance, getEmployeeProfile, deleteEmployee, generateSalary,
-  updateEmployeeSalary, getSetting, getDenominationDrawer
+  updateEmployeeSalary, getSetting, getDenominationDrawer,
+  uploadEmployeePhoto, deleteEmployeePhoto,
 } from '../services/api'
 import DenominationCounter from '../components/DenominationCounter'
 import LoadingButton from '../components/LoadingButton'
 import SectionLoader from '../components/SectionLoader'
+import PageHeader from '../components/ui/PageHeader'
+import Card from '../components/ui/Card'
+import Badge from '../components/ui/Badge'
+import { PrimaryButton, SecondaryButton } from '../components/ui/Button'
+import { Table, THead, Th, TBody, Tr, Td } from '../components/ui/Table'
 import {
-  Users, CalendarCheck, CalendarDays, Wallet, User, Trash2,
+  Users, CalendarCheck, CalendarDays, Wallet, Trash2,
   Banknote, Smartphone, CheckCircle2, XCircle, Pencil, X,
-  Send, ArrowUpFromLine, AlertTriangle, Clock, Phone,
+  Send, ArrowUpFromLine, AlertTriangle, Clock, Phone, Camera,
+  Plus, IndianRupee,
 } from 'lucide-react'
 
 const UPI_ACCOUNTS = [
@@ -21,6 +28,31 @@ const UPI_ACCOUNTS = [
   'Demo UPI Account 4'
 ]
 
+const inputClasses = 'bg-slate-800/80 border border-slate-700/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 px-3.5 py-2.5 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/80 w-full min-w-0 disabled:opacity-50 disabled:cursor-not-allowed'
+const labelClasses = 'text-[11px] font-semibold text-slate-400 block mb-1.5'
+
+function attendanceTone(status) {
+  return status === 'present' ? 'emerald' : status === 'absent' ? 'red' : 'amber'
+}
+
+function EmployeeAvatar({ employee, size = 14 }) {
+  const sizeClasses = size === 14 ? 'w-14 h-14 text-xl' : 'w-9 h-9 text-sm'
+  if (employee.photo_path) {
+    return (
+      <img
+        src={`http://localhost:5000/${employee.photo_path}`}
+        alt={employee.name}
+        className={`${sizeClasses} rounded-2xl object-cover border border-slate-700 shrink-0`}
+      />
+    )
+  }
+  return (
+    <div className={`${sizeClasses} rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/20 shrink-0`}>
+      {employee.name?.charAt(0).toUpperCase()}
+    </div>
+  )
+}
+
 function Employees() {
   const [employees, setEmployees] = useState([])
   const [loading, setLoading] = useState(true)
@@ -28,17 +60,18 @@ function Employees() {
   const [message, setMessage] = useState('')
   const [activeTab, setActiveTab] = useState('list')
 
-  // Message ab khud-ba-khud gayab ho jaata hai (4 sec baad) — pehle sirf
-  // click-karke-hatao tha, isliye purana success-message screen pe atka
-  // reh jaata tha jab tak koi naya action na ho.
+  // Message auto-clears after 4s instead of requiring a manual click to
+  // dismiss — otherwise a stale success message could sit on screen
+  // indefinitely until the next action.
   useEffect(() => {
     if (!message) return
     const timer = setTimeout(() => setMessage(''), 4000)
     return () => clearTimeout(timer)
   }, [message])
 
-  // Tab badalte hi purana message turant clear — warna "salary credited"
-  // wala banner "Mark Attendance" ya "Profile" tab pe bhi dikhta rehta tha.
+  // Clear any leftover message the moment the tab changes — otherwise a
+  // "salary credited" banner could still show up on the Mark Attendance
+  // or Profile tab.
   function changeTab(tab) {
     setMessage('')
     setActiveTab(tab)
@@ -55,15 +88,16 @@ function Employees() {
   const [showSalaryEdit, setShowSalaryEdit] = useState(false)
   const [salaryEditForm, setSalaryEditForm] = useState({ new_salary: '', reason: '', effective_date: '' })
   const [salaryEditLoading, setSalaryEditLoading] = useState(false)
-  // Note-wise Cash Tracking — global setting (Galla Hisaab tab wali hi key)
+  // Note-wise cash tracking — global setting (same key as the Cash Drawer tab)
   const [noteTrackingEnabled, setNoteTrackingEnabled] = useState(true)
-  // Live drawer notes — salary (outflow) ko available notes se zyada nahi badhne dena
+  // Live drawer notes — keeps salary payouts from exceeding what's in the drawer
   const [availableNotes, setAvailableNotes] = useState(null)
   const [addEmpSaving, setAddEmpSaving] = useState(false)
   const [attendanceSaving, setAttendanceSaving] = useState(false)
   const [deletingEmpId, setDeletingEmpId] = useState(null)
   const [calendarLoading, setCalendarLoading] = useState(false)
   const [salaryCalcLoading, setSalaryCalcLoading] = useState(false)
+  const [photoUploadingId, setPhotoUploadingId] = useState(null)
 
   const [form, setForm] = useState({
     name: '', phone: '', monthly_salary: '', join_date: ''
@@ -86,17 +120,6 @@ function Employees() {
   const [calendarYear, setCalendarYear] = useState(
     String(new Date().getFullYear())
   )
-
-  // const [genMonth, setGenMonth] = useState(
-  //   String(new Date().getMonth() + 1).padStart(2, '0')
-  // )
-  // const [genYear, setGenYear] = useState(
-  //   String(new Date().getFullYear())
-  // )
-  // (genMonth/genYear hataye — Profile ab all-time hai, month/year selector
-  // ki zaroorat nahi. Note: "Salary" tab ka apna salaryMonth/salaryYear alag
-  // hai — wo as-is rehta hai, kyunki wo specific month ki salary credit karne
-  // ke liye hai, jo intentionally month-wise hi rehna chahiye.)
 
   useEffect(() => {
     fetchEmployees()
@@ -179,30 +202,30 @@ function Employees() {
   }
 
   function handleCreditSalary() {
-  if (!selectedEmployee || !salaryData) return
-  if (salaryPaymentMode === 'upi' && !salaryUpiAccount) {
-    return setMessage('UPI ke liye account select karo.')
-  }
-  setCrediting(true)
-  generateSalary({
-    employee_id: selectedEmployee.id,
-    month: salaryMonth,
-    year: salaryYear,
-    payment_mode: salaryPaymentMode,
-    upi_account: salaryPaymentMode === 'upi' ? salaryUpiAccount : null,
-    notes: `${salaryMonth}/${salaryYear} salary`,
-    denomination_breakdown: salaryPaymentMode === 'cash' && Object.keys(salaryDenomination).length > 0
-      ? salaryDenomination : null
-  })
-    .then(() => {
-      setMessage(`✅ ₹${salaryData.calculated_salary} salary credited to ${selectedEmployee.name}`)
-      setSalaryDenomination({})
-      fetchSalary(selectedEmployee.id, salaryMonth, salaryYear)
-      refreshAvailableNotes()
+    if (!selectedEmployee || !salaryData) return
+    if (salaryPaymentMode === 'upi' && !salaryUpiAccount) {
+      return setMessage('Select a UPI account first.')
+    }
+    setCrediting(true)
+    generateSalary({
+      employee_id: selectedEmployee.id,
+      month: salaryMonth,
+      year: salaryYear,
+      payment_mode: salaryPaymentMode,
+      upi_account: salaryPaymentMode === 'upi' ? salaryUpiAccount : null,
+      notes: `${salaryMonth}/${salaryYear} salary`,
+      denomination_breakdown: salaryPaymentMode === 'cash' && Object.keys(salaryDenomination).length > 0
+        ? salaryDenomination : null
     })
-    .catch(err => setMessage('Error: ' + (err.response?.data?.error || 'Could not credit salary')))
-    .finally(() => setCrediting(false))
-}
+      .then(() => {
+        setMessage(`✅ ₹${salaryData.calculated_salary} salary credited to ${selectedEmployee.name}`)
+        setSalaryDenomination({})
+        fetchSalary(selectedEmployee.id, salaryMonth, salaryYear)
+        refreshAvailableNotes()
+      })
+      .catch(err => setMessage('Error: ' + (err.response?.data?.error || 'Could not credit salary')))
+      .finally(() => setCrediting(false))
+  }
 
   function fetchCalendar(empId, month, year) {
     return getAttendance(empId, { month, year })
@@ -219,12 +242,13 @@ function Employees() {
     fetchCalendar(calendarEmployee.id, calendarMonth, calendarYear)
       .finally(() => setCalendarLoading(false))
   }
+
   function handleDeleteEmployee(emp) {
-    if (!window.confirm(`"${emp.name}" ko delete karna chahte ho?\nIska attendance, salary aur payments bhi delete ho jayega!`)) return
+    if (!window.confirm(`Delete "${emp.name}"?\nTheir attendance, salary, and payment records will also be deleted!`)) return
     setDeletingEmpId(emp.id)
     deleteEmployee(emp.id)
       .then(() => {
-        setMessage(`${emp.name} delete ho gaya.`)
+        setMessage(`${emp.name} deleted.`)
         fetchEmployees()
       })
       .catch(() => setMessage('Error deleting employee.'))
@@ -233,7 +257,7 @@ function Employees() {
 
   function handleSalaryUpdate(e) {
     e.preventDefault()
-    if (!salaryEditForm.new_salary) return setMessage('Nai salary daalo.')
+    if (!salaryEditForm.new_salary) return setMessage('Enter the new salary amount.')
     setSalaryEditLoading(true)
     updateEmployeeSalary(selectedEmployee.id, {
       new_salary: parseInt(salaryEditForm.new_salary),
@@ -241,7 +265,7 @@ function Employees() {
       effective_date: salaryEditForm.effective_date || today
     })
       .then(res => {
-        setMessage(`✅ ${selectedEmployee.name} ki salary ₹${res.data.old_salary} se ₹${res.data.new_salary} ho gayi!`)
+        setMessage(`✅ ${selectedEmployee.name}'s salary changed from ₹${res.data.old_salary} to ₹${res.data.new_salary}!`)
         setShowSalaryEdit(false)
         setSalaryEditForm({ new_salary: '', reason: '', effective_date: '' })
         fetchEmployees()
@@ -251,8 +275,8 @@ function Employees() {
       .finally(() => setSalaryEditLoading(false))
   }
 
-  // Profile ab ALL-TIME data dikhata hai (join date se ab tak) — month/year
-  // params ki ab zaroorat nahi (backend bhi ab ignore/accept nahi karta).
+  // Profile shows ALL-TIME data (from join date to now) — month/year params
+  // aren't needed (the backend ignores/doesn't accept them either).
   function loadEmployeeProfile(emp) {
     setSelectedEmployee(emp)
     setEmployeeProfile(null)
@@ -269,16 +293,34 @@ function Employees() {
       })
   }
 
-  // ── FIX: fmtDT — display stored timestamp as-is, no Date() re-parsing
-  // The DB stores "2026-06-17 14:52:58" (IST). Passing this through new Date()
-  // re-interprets it as UTC and adds +5:30 offset, showing the wrong time.
-  // Instead we just format the stored string directly.
+  function openProfile(emp) {
+    loadEmployeeProfile(emp)
+    changeTab('profile')
+  }
+
+  function handlePhotoUpload(e, emp) {
+    const file = e.target.files[0]
+    if (!file) return
+    setPhotoUploadingId(emp.id)
+    uploadEmployeePhoto(emp.id, file)
+      .then(() => fetchEmployees())
+      .catch(() => setMessage('Photo upload failed.'))
+      .finally(() => setPhotoUploadingId(null))
+  }
+
+  function handlePhotoRemove(emp) {
+    if (!window.confirm('Remove this photo?')) return
+    deleteEmployeePhoto(emp.id)
+      .then(() => fetchEmployees())
+      .catch(() => setMessage('Error removing photo.'))
+  }
+
+  // display stored "YYYY-MM-DD HH:MM:SS" (IST) timestamp as-is, without
+  // re-parsing through Date() — that would re-interpret it as UTC and shift
+  // it by +5:30, showing the wrong time.
   function fmtDT(dateStr) {
     if (!dateStr) return '—'
-    // Try to parse YYYY-MM-DD HH:MM:SS or ISO format
-    // We display as-is without timezone conversion
     const clean = dateStr.replace('T', ' ').substring(0, 19)
-    // clean = "2026-06-17 14:52:58"
     const parts = clean.split(' ')
     if (parts.length === 2) {
       const [datePart, timePart] = parts
@@ -303,746 +345,667 @@ function Employees() {
   const { daysInMonth, firstDay } = buildCalendar(calendarMonth, calendarYear)
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-  // Calendar/Salary/Profile ab top-tabs mein nahi hain — redundant the row-action
-  // buttons (Salary/Calendar/Profile, employee-list mein har row ke saamne) ke saath,
-  // jo already same activeTab set karte hain + employee bhi seedha select kar dete hain
-  // (ek-click, faster). Tab content (activeTab === 'salary' / 'calendar' / 'profile')
-  // as-is rehta hai — bas manual-click se navigate karne ka option hata hai.
+  // Calendar/Salary/Profile aren't in the top tab row — they're reached via
+  // the per-employee actions instead (Salary/Calendar buttons, or clicking
+  // the employee's name for Profile), which set activeTab AND select the
+  // employee in one click.
   const TABS = [
-    { key: 'list',       label: <><Users size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Employees</> },
-    { key: 'attendance', label: <><CalendarCheck size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Mark Attendance</> }
+    { key: 'list',       label: 'Employees',       icon: Users },
+    { key: 'attendance', label: 'Mark Attendance', icon: CalendarCheck },
   ]
 
   return (
     <PageLock pageKey="employees" pageTitle="Employees">
-    <div>
-      {/* HEADER */}
-      <div style={styles.header}>
-        <h2>Employees</h2>
-        <button style={styles.addBtn} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ Add Employee'}
-        </button>
-      </div>
+      <div className="space-y-6">
+        <PageHeader
+          title="Employees"
+          subtitle="Staff roster, attendance tracking, and salary management"
+          actions={
+            showForm ? (
+              <SecondaryButton icon={X} onClick={() => setShowForm(false)}>Cancel</SecondaryButton>
+            ) : (
+              <PrimaryButton icon={Plus} onClick={() => setShowForm(true)}>Add Employee</PrimaryButton>
+            )
+          }
+        />
 
-      {message && (
-        <p style={styles.message} onClick={() => setMessage('')}>{message}</p>
-      )}
-
-      {/* ADD FORM */}
-      {showForm && (
-        <div style={styles.formBox}>
-          <h3 style={{ marginBottom: '16px' }}>New Employee</h3>
-          <form onSubmit={handleAddEmployee}>
-            <div style={styles.formRow}>
-              <input style={styles.input} placeholder="Full Name *" name="name"
-                value={form.name} onChange={handleFormChange} />
-              <input style={styles.input} placeholder="Phone Number" name="phone"
-                value={form.phone} onChange={handleFormChange} />
-              <input style={styles.input} placeholder="Monthly Salary (₹)"
-                name="monthly_salary" type="number"
-                value={form.monthly_salary} onChange={handleFormChange} />
-              <div style={{ flex: 1 }}>
-                <label style={styles.label}>Joining Date</label>
-                <input style={styles.input} type="date" name="join_date"
-                  value={form.join_date} onChange={handleFormChange} />
-              </div>
-            </div>
-            <LoadingButton loading={addEmpSaving} style={styles.submitBtn} type="submit">Save Employee</LoadingButton>
-          </form>
-        </div>
-      )}
-
-      {/* TABS */}
-      <div style={styles.tabRow}>
-        {TABS.map(t => (
-          <button key={t.key}
-            style={{ ...styles.tab, ...(activeTab === t.key ? styles.activeTab : {}) }}
-            onClick={() => changeTab(t.key)}
+        {message && (
+          <p
+            onClick={() => setMessage('')}
+            className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-4 py-3 rounded-xl cursor-pointer text-sm"
           >
-            {t.label}
-          </button>
-        ))}
-      </div>
+            {message}
+          </p>
+        )}
 
-      {/* ── TAB: LIST ── */}
-      {activeTab === 'list' && (
-        loading ? <SectionLoader label="Employees load ho rahe hain..." /> : employees.length === 0 ? (
-          <p style={{ color: '#888' }}>No employees found.</p>
-        ) : (
-          <div style={styles.tableScroll}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>#</th>
-                <th style={styles.th}>Name</th>
-                <th style={styles.th}>Phone</th>
-                <th style={styles.th}>Monthly Salary</th>
-                <th style={styles.th}>Per Day</th>
-                <th style={styles.th}>Joining Date</th>
-                <th style={styles.th}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {employees.map((emp, index) => (
-                <tr key={emp.id} style={styles.tr}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}
-                >
-                  <td style={styles.td}>{index + 1}</td>
-                  <td style={styles.td}><strong>{emp.name}</strong></td>
-                  <td style={styles.td}>{emp.phone || '—'}</td>
-                  <td style={styles.td}>₹{emp.monthly_salary}</td>
-                  <td style={styles.td}>₹{Math.round(emp.monthly_salary / 30)}</td>
-                  <td style={styles.td}>{emp.join_date || '—'}</td>
-                  <td style={styles.td}>
-                    <button onClick={() => {
-                      setSelectedEmployee(emp)
-                      setSalaryData(null)
-                      changeTab('salary')
-                    }} style={{ ...styles.actionBtn, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      <Wallet size={12} /> Salary
+        {showForm && (
+          <Card>
+            <h3 className="text-white font-bold mb-4">New Employee</h3>
+            <form onSubmit={handleAddEmployee} className="space-y-3">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input className={inputClasses} placeholder="Full Name *" name="name"
+                  value={form.name} onChange={handleFormChange} />
+                <input className={inputClasses} placeholder="Phone Number" name="phone"
+                  value={form.phone} onChange={handleFormChange} />
+                <input className={inputClasses} placeholder="Monthly Salary (₹)"
+                  name="monthly_salary" type="number"
+                  value={form.monthly_salary} onChange={handleFormChange} />
+                <div className="flex-1 min-w-0">
+                  <label className={labelClasses}>Joining Date</label>
+                  <input className={inputClasses} type="date" name="join_date"
+                    value={form.join_date} onChange={handleFormChange} />
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500">A photo can be added afterward from the employee's card.</p>
+              <LoadingButton
+                loading={addEmpSaving}
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25"
+              >
+                Save Employee
+              </LoadingButton>
+            </form>
+          </Card>
+        )}
+
+        {/* TABS */}
+        <div className="flex gap-2 flex-wrap">
+          {TABS.map(t => {
+            const Icon = t.icon
+            const active = activeTab === t.key
+            return (
+              <button
+                key={t.key}
+                onClick={() => changeTab(t.key)}
+                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all ${
+                  active ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+                }`}
+              >
+                <Icon className="w-4 h-4" /> {t.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* ── TAB: LIST — card grid ── */}
+        {activeTab === 'list' && (
+          loading ? <SectionLoader label="Loading employees..." /> : employees.length === 0 ? (
+            <p className="text-slate-500 text-sm">No employees found.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {employees.map(emp => (
+                <Card key={emp.id} className="hover:border-slate-700 transition-all flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start gap-4">
+                      <div className="relative shrink-0">
+                        <EmployeeAvatar employee={emp} />
+                        <label
+                          title="Upload photo"
+                          className="absolute -bottom-1 -right-1 bg-slate-800 border border-slate-700 rounded-full w-6 h-6 flex items-center justify-center cursor-pointer hover:bg-slate-700"
+                        >
+                          <Camera className="w-3 h-3 text-slate-300" />
+                          <input type="file" accept="image/*" capture="environment" onChange={e => handlePhotoUpload(e, emp)} className="hidden" />
+                        </label>
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <button
+                          onClick={() => openProfile(emp)}
+                          className="font-bold text-white text-base hover:text-blue-400 transition-colors text-left truncate block"
+                        >
+                          {emp.name}
+                        </button>
+                        <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-1">
+                          <Phone className="w-3 h-3 text-slate-500" /> {emp.phone || '—'}
+                        </p>
+                        {photoUploadingId === emp.id && <p className="text-[11px] text-slate-500 mt-1">Uploading photo...</p>}
+                        {emp.photo_path && photoUploadingId !== emp.id && (
+                          <button onClick={() => handlePhotoRemove(emp)} className="text-[11px] text-red-400 underline mt-1">
+                            Remove photo
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 bg-slate-950 p-3 rounded-2xl border border-slate-800 space-y-1.5">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-400">Monthly Salary</span>
+                        <span className="font-mono font-bold text-white">₹{emp.monthly_salary}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-400">Per Day</span>
+                        <span className="font-mono text-slate-300">₹{Math.round(emp.monthly_salary / 30)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-slate-400">Joined</span>
+                        <span className="text-slate-300">{emp.join_date || '—'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 mt-4 border-t border-slate-800 flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => { setSelectedEmployee(emp); setSalaryData(null); changeTab('salary') }}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700/80 transition-all"
+                    >
+                      <Wallet className="w-3.5 h-3.5" /> Salary
                     </button>
-                    <button onClick={() => {
-                      setCalendarEmployee(emp)
-                      changeTab('calendar')
-                      fetchCalendar(emp.id, calendarMonth, calendarYear)
-                    }} style={{ ...styles.actionBtn, marginLeft: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      <CalendarDays size={12} /> Calendar
-                    </button>
-                    <button onClick={() => {
-                      loadEmployeeProfile(emp)
-                      changeTab('profile')
-                    }} style={{ ...styles.actionBtn, marginLeft: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      <User size={12} /> Profile
+                    <button
+                      onClick={() => { setCalendarEmployee(emp); changeTab('calendar'); fetchCalendar(emp.id, calendarMonth, calendarYear) }}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700/80 transition-all"
+                    >
+                      <CalendarDays className="w-3.5 h-3.5" /> Calendar
                     </button>
                     <LoadingButton
                       loading={deletingEmpId === emp.id}
                       loadingText="..."
                       onClick={() => handleDeleteEmployee(emp)}
-                      style={{ backgroundColor: '#800000', color: '#fff', border: '1px solid #800000', padding: '5px 10px', borderRadius: '4px', fontSize: '12px', marginLeft: '6px' }}>
-                      <Trash2 size={12} /> Delete
-                    </LoadingButton>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        )
-      )}
-
-      {/* ── TAB: MARK ATTENDANCE ── */}
-      {activeTab === 'attendance' && (
-        <div style={styles.section}>
-          <div style={styles.attendanceHeader}>
-            <h3>Mark Attendance</h3>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <input
-                style={{ ...styles.input, width: '180px', flex: 'none' }}
-                type="date" value={attendanceDate}
-                onChange={e => setAttendanceDate(e.target.value)}
-              />
-              <LoadingButton loading={attendanceSaving} style={styles.submitBtn} onClick={handleSubmitAttendance}>
-                Save Attendance
-              </LoadingButton>
-            </div>
-          </div>
-
-          {employees.length === 0 ? <p style={{ color: '#888' }}>No employees.</p> : (
-            <div style={styles.tableScroll}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>#</th>
-                  <th style={styles.th}>Name</th>
-                  <th style={styles.th}>Per Day</th>
-                  <th style={styles.th}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {employees.map((emp, index) => (
-                  <tr key={emp.id} style={styles.tr}>
-                    <td style={styles.td}>{index + 1}</td>
-                    <td style={styles.td}><strong>{emp.name}</strong></td>
-                    <td style={styles.td}>₹{Math.round(emp.monthly_salary / 30)}</td>
-                    <td style={styles.td}>
-                      <div style={styles.statusBtns}>
-                        {['present', 'absent', 'half_day'].map(s => (
-                          <button key={s}
-                            onClick={() => handleAttendanceChange(emp.id, s)}
-                            style={{
-                              ...styles.statusBtn,
-                              backgroundColor: attendanceRecords[emp.id] === s ? attendanceColor(s) : '#fff',
-                              color: attendanceRecords[emp.id] === s ? '#fff' : '#555',
-                              border: `1px solid ${attendanceColor(s)}`
-                            }}
-                          >
-                            {s === 'present' ? <><CheckCircle2 size={12} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Present</>
-                              : s === 'absent' ? <><XCircle size={12} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Absent</>
-                              : '½ Half Day'}
-                          </button>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── TAB: CALENDAR ── */}
-      {activeTab === 'calendar' && (
-        <div style={styles.section}>
-          <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}><CalendarDays size={17} /> Attendance Calendar</h3>
-
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div>
-              <label style={styles.label}>Employee</label>
-              <select style={{ ...styles.input, minWidth: '180px' }}
-                value={calendarEmployee?.id || ''}
-                onChange={e => {
-                  const emp = employees.find(em => em.id === parseInt(e.target.value))
-                  setCalendarEmployee(emp)
-                  setAttendanceCalendar([])
-                }}
-              >
-                <option value="">Select Employee</option>
-                {employees.map(emp => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={styles.label}>Month</label>
-              <select style={{ ...styles.input, minWidth: '130px' }} value={calendarMonth}
-                onChange={e => setCalendarMonth(e.target.value)}>
-                {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m, i) => (
-                  <option key={m} value={m}>
-                    {new Date(2000, i).toLocaleString('en-IN', { month: 'long' })}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={styles.label}>Year</label>
-              <select style={{ ...styles.input, minWidth: '100px' }} value={calendarYear}
-                onChange={e => setCalendarYear(e.target.value)}>
-                {['2024', '2025', '2026', '2027'].map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-            </div>
-            <LoadingButton loading={calendarLoading} style={styles.submitBtn} onClick={handleCalendarLoad}>
-              Load Calendar
-            </LoadingButton>
-          </div>
-
-          {calendarEmployee && (
-            <>
-              <div style={styles.legend}>
-                <span style={styles.legendItem}>
-                  <span style={{ ...styles.legendDot, backgroundColor: '#27ae60' }}></span> Present
-                </span>
-                <span style={styles.legendItem}>
-                  <span style={{ ...styles.legendDot, backgroundColor: '#e74c3c' }}></span> Absent
-                </span>
-                <span style={styles.legendItem}>
-                  <span style={{ ...styles.legendDot, backgroundColor: '#f39c12' }}></span> Half Day
-                </span>
-                <span style={styles.legendItem}>
-                  <span style={{ ...styles.legendDot, backgroundColor: '#ecf0f1' }}></span> Not Marked
-                </span>
-              </div>
-
-              <div style={styles.calendarBox}>
-                <h4 style={{ marginBottom: '12px', textAlign: 'center', color: '#1a1a2e' }}>
-                  {calendarEmployee.name} — {new Date(2000, parseInt(calendarMonth) - 1)
-                    .toLocaleString('en-IN', { month: 'long' })} {calendarYear}
-                </h4>
-                <div style={styles.calendarGrid}>
-                  {dayLabels.map(d => (
-                    <div key={d} style={styles.dayLabel}>{d}</div>
-                  ))}
-                  {Array.from({ length: firstDay }).map((_, i) => (
-                    <div key={`empty-${i}`} style={styles.emptyCell}></div>
-                  ))}
-                  {Array.from({ length: daysInMonth }).map((_, i) => {
-                    const day = i + 1
-                    const status = getDayStatus(day)
-                    return (
-                      <div key={day} style={{
-                        ...styles.dayCell,
-                        backgroundColor: status === 'present' ? '#27ae60'
-                          : status === 'absent' ? '#e74c3c'
-                          : status === 'half_day' ? '#f39c12'
-                          : '#ecf0f1',
-                        color: status ? '#fff' : '#888'
-                      }}>
-                        <div style={styles.dayNumber}>{day}</div>
-                        {status && (
-                          <div style={styles.dayStatus}>
-                            {status === 'present' ? '✓' : status === 'absent' ? '✗' : '½'}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-
-                {attendanceCalendar.length > 0 && (
-                  <div style={styles.calendarSummary}>
-                    <div style={styles.summaryItem}>
-                      <span style={{ color: '#27ae60', fontWeight: 'bold', fontSize: '20px' }}>
-                        {attendanceCalendar.filter(r => r.status === 'present').length}
-                      </span>
-                      <span style={styles.summaryLabel}>Present</span>
-                    </div>
-                    <div style={styles.summaryItem}>
-                      <span style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: '20px' }}>
-                        {attendanceCalendar.filter(r => r.status === 'absent').length}
-                      </span>
-                      <span style={styles.summaryLabel}>Absent</span>
-                    </div>
-                    <div style={styles.summaryItem}>
-                      <span style={{ color: '#f39c12', fontWeight: 'bold', fontSize: '20px' }}>
-                        {attendanceCalendar.filter(r => r.status === 'half_day').length}
-                      </span>
-                      <span style={styles.summaryLabel}>Half Day</span>
-                    </div>
-                    <div style={styles.summaryItem}>
-                      <span style={{ color: '#1a1a2e', fontWeight: 'bold', fontSize: '20px' }}>
-                        {attendanceCalendar.length}
-                      </span>
-                      <span style={styles.summaryLabel}>Total Marked</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── TAB: SALARY ── */}
-      {activeTab === 'salary' && (
-        <div style={styles.section}>
-          <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}><Wallet size={17} /> Salary Calculator</h3>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div>
-              <label style={styles.label}>Employee</label>
-              <select style={{ ...styles.input, minWidth: '200px' }}
-                value={selectedEmployee?.id || ''}
-                onChange={e => {
-                  const emp = employees.find(em => em.id === parseInt(e.target.value))
-                  setSelectedEmployee(emp)
-                  setSalaryData(null)
-                }}
-              >
-                <option value="">Select Employee</option>
-                {employees.map(emp => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={styles.label}>Month</label>
-              <select style={{ ...styles.input, minWidth: '130px' }} value={salaryMonth}
-                onChange={e => setSalaryMonth(e.target.value)}>
-                {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m, i) => (
-                  <option key={m} value={m}>
-                    {new Date(2000, i).toLocaleString('en-IN', { month: 'long' })}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={styles.label}>Year</label>
-              <select style={{ ...styles.input, minWidth: '100px' }} value={salaryYear}
-                onChange={e => setSalaryYear(e.target.value)}>
-                {['2024', '2025', '2026', '2027'].map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-            </div>
-            <LoadingButton
-              loading={salaryCalcLoading}
-              style={styles.submitBtn}
-              onClick={() => {
-                if (!selectedEmployee) return
-                setSalaryCalcLoading(true)
-                fetchSalary(selectedEmployee.id, salaryMonth, salaryYear)
-              }}
-            >
-              Calculate
-            </LoadingButton>
-          </div>
-
-          {salaryData && (
-            <div style={styles.salaryCard}>
-              <h3 style={{ marginBottom: '16px', color: '#1a1a2e' }}>
-                {salaryData.employee_name} — {new Date(2000, parseInt(salaryMonth) - 1)
-                  .toLocaleString('en-IN', { month: 'long' })} {salaryYear}
-              </h3>
-              <div style={styles.salaryGrid}>
-                <div style={styles.salaryItem}>
-                  <div style={styles.salaryLabel}>Monthly Salary</div>
-                  <div style={styles.salaryValue}>₹{salaryData.monthly_salary}</div>
-                </div>
-                <div style={styles.salaryItem}>
-                  <div style={styles.salaryLabel}>Per Day Rate</div>
-                  <div style={styles.salaryValue}>₹{salaryData.per_day_salary}</div>
-                </div>
-                <div style={styles.salaryItem}>
-                  <div style={styles.salaryLabel}>Present Days</div>
-                  <div style={{ ...styles.salaryValue, color: '#27ae60' }}>{salaryData.present_days}</div>
-                </div>
-                <div style={styles.salaryItem}>
-                  <div style={styles.salaryLabel}>Half Days</div>
-                  <div style={{ ...styles.salaryValue, color: '#f39c12' }}>{salaryData.half_days}</div>
-                </div>
-                <div style={styles.salaryItem}>
-                  <div style={styles.salaryLabel}>Absent Days</div>
-                  <div style={{ ...styles.salaryValue, color: '#e74c3c' }}>{salaryData.absent_days}</div>
-                </div>
-                <div style={styles.salaryItem}>
-                  <div style={styles.salaryLabel}>Deduction</div>
-                  <div style={{ ...styles.salaryValue, color: '#e74c3c' }}>- ₹{salaryData.deduction}</div>
-                </div>
-              </div>
-              <div style={styles.salaryTotal}>
-                <span>Payable Salary</span>
-                <strong style={{ fontSize: '24px', color: '#27ae60' }}>
-                  ₹{salaryData.calculated_salary}
-                </strong>
-              </div>
-
-              {/* CREDIT SALARY */}
-              <div style={{ backgroundColor: '#fff', padding: '20px', borderRadius: '8px', marginTop: '16px' }}>
-                <h4 style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}><Send size={15} /> Credit This Salary</h4>
-
-                <div style={{ marginBottom: '12px' }}>
-                  <label style={styles.label}>Payment Mode</label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button type="button"
-                      onClick={() => { setSalaryPaymentMode('cash'); setSalaryUpiAccount('') }}
-                      style={{
-                        padding: '8px 16px', borderRadius: '6px', border: '1px solid #ddd', cursor: 'pointer', fontSize: '13px',
-                        backgroundColor: salaryPaymentMode === 'cash' ? '#27ae60' : '#fff',
-                        color: salaryPaymentMode === 'cash' ? '#fff' : '#333'
-                      }}
-                    ><Banknote size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Cash</button>
-                    <button type="button"
-                      onClick={() => setSalaryPaymentMode('upi')}
-                      style={{
-                        padding: '8px 16px', borderRadius: '6px', border: '1px solid #ddd', cursor: 'pointer', fontSize: '13px',
-                        backgroundColor: salaryPaymentMode === 'upi' ? '#1565c0' : '#fff',
-                        color: salaryPaymentMode === 'upi' ? '#fff' : '#333'
-                      }}
-                    ><Smartphone size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />UPI</button>
-                  </div>
-                </div>
-
-                {salaryPaymentMode === 'upi' && (
-                  <div style={{ marginBottom: '12px' }}>
-                    <label style={styles.label}>UPI Account *</label>
-                    <select style={{ ...styles.input, maxWidth: '260px' }}
-                      value={salaryUpiAccount}
-                      onChange={e => setSalaryUpiAccount(e.target.value)}
+                      className="ml-auto px-3 py-2 rounded-xl text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20"
                     >
-                      <option value="">Select UPI Account</option>
-                      {UPI_ACCOUNTS.map(acc => (
-                        <option key={acc} value={acc}>{acc}</option>
-                      ))}
-                    </select>
+                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    </LoadingButton>
                   </div>
-                )}
+                </Card>
+              ))}
+            </div>
+          )
+        )}
 
-                {salaryPaymentMode === 'cash' && noteTrackingEnabled && (
-                  <DenominationCounter
-                    context="expense"
-                    availableNotes={availableNotes}
-                    onApply={(total, counts) => setSalaryDenomination(counts)}
-                  />
-                )}
-
+        {/* ── TAB: MARK ATTENDANCE ── */}
+        {activeTab === 'attendance' && (
+          <Card>
+            <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+              <h3 className="text-white font-bold">Mark Attendance</h3>
+              <div className="flex items-center gap-3">
+                <input
+                  type="date"
+                  className={`${inputClasses} w-[170px]`}
+                  value={attendanceDate}
+                  onChange={e => setAttendanceDate(e.target.value)}
+                />
                 <LoadingButton
-                  onClick={handleCreditSalary}
-                  loading={crediting}
-                  loadingText="Crediting..."
-                  style={{ ...styles.submitBtn, marginTop: '12px' }}
+                  loading={attendanceSaving}
+                  onClick={handleSubmitAttendance}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25 whitespace-nowrap"
                 >
-                  <CheckCircle2 size={14} /> Credit ₹{salaryData.calculated_salary} to {selectedEmployee?.name}
+                  Save Attendance
                 </LoadingButton>
               </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* ── TAB: PROFILE ── */}
-      {activeTab === 'profile' && (
-        <div>
-          {/* Employee selector buttons */}
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
-            {employees.map(emp => (
-              <button key={emp.id}
-                onClick={() => loadEmployeeProfile(emp)}
-                style={{
-                  padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '14px',
-                  backgroundColor: selectedEmployee?.id === emp.id ? '#1a1a2e' : '#fff',
-                  color: selectedEmployee?.id === emp.id ? '#fff' : '#333',
-                  border: selectedEmployee?.id === emp.id ? '1px solid #1a1a2e' : '1px solid #ddd'
-                }}
+            {employees.length === 0 ? <p className="text-slate-500 text-sm">No employees.</p> : (
+              <Table minWidth="500px">
+                <THead>
+                  <Th>#</Th>
+                  <Th>Name</Th>
+                  <Th>Per Day</Th>
+                  <Th>Status</Th>
+                </THead>
+                <TBody>
+                  {employees.map((emp, index) => (
+                    <Tr key={emp.id}>
+                      <Td className="text-slate-400">{index + 1}</Td>
+                      <Td className="font-bold text-white">{emp.name}</Td>
+                      <Td className="font-mono text-slate-300">₹{Math.round(emp.monthly_salary / 30)}</Td>
+                      <Td>
+                        <div className="flex gap-2 flex-wrap">
+                          {['present', 'absent', 'half_day'].map(s => {
+                            const active = attendanceRecords[emp.id] === s
+                            const tone = attendanceTone(s)
+                            return (
+                              <button
+                                key={s}
+                                onClick={() => handleAttendanceChange(emp.id, s)}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                                  active
+                                    ? tone === 'emerald' ? 'bg-emerald-600 border-emerald-500 text-white'
+                                      : tone === 'red' ? 'bg-red-600 border-red-500 text-white'
+                                      : 'bg-amber-600 border-amber-500 text-white'
+                                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+                                }`}
+                              >
+                                {s === 'present' ? <><CheckCircle2 className="w-3 h-3" /> Present</>
+                                  : s === 'absent' ? <><XCircle className="w-3 h-3" /> Absent</>
+                                  : '½ Half Day'}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </Td>
+                    </Tr>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+          </Card>
+        )}
+
+        {/* ── TAB: CALENDAR ── */}
+        {activeTab === 'calendar' && (
+          <Card>
+            <h3 className="text-white font-bold mb-4 flex items-center gap-2"><CalendarDays className="w-4 h-4" /> Attendance Calendar</h3>
+
+            <div className="flex gap-3 flex-wrap items-end mb-5">
+              <div>
+                <label className={labelClasses}>Employee</label>
+                <select
+                  className={`${inputClasses} min-w-[180px]`}
+                  value={calendarEmployee?.id || ''}
+                  onChange={e => {
+                    const emp = employees.find(em => em.id === parseInt(e.target.value))
+                    setCalendarEmployee(emp)
+                    setAttendanceCalendar([])
+                  }}
+                >
+                  <option value="">Select Employee</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClasses}>Month</label>
+                <select className={`${inputClasses} min-w-[140px]`} value={calendarMonth} onChange={e => setCalendarMonth(e.target.value)}>
+                  {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m, i) => (
+                    <option key={m} value={m}>{new Date(2000, i).toLocaleString('en-IN', { month: 'long' })}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClasses}>Year</label>
+                <select className={`${inputClasses} min-w-[100px]`} value={calendarYear} onChange={e => setCalendarYear(e.target.value)}>
+                  {['2024', '2025', '2026', '2027'].map(y => (<option key={y} value={y}>{y}</option>))}
+                </select>
+              </div>
+              <LoadingButton
+                loading={calendarLoading}
+                onClick={handleCalendarLoad}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25"
               >
-                <User size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />{emp.name}
-              </button>
-            ))}
-          </div>
-
-          {/* FIX: Show real error message instead of generic "Error loading profile" */}
-          {profileError && (
-            <p style={{ color: '#c0392b', backgroundColor: '#fdf2f2', padding: '10px 16px', borderRadius: '6px', marginBottom: '12px' }}>
-              {profileError}
-            </p>
-          )}
-
-          {!employeeProfile && selectedEmployee && !profileError && (
-            <SectionLoader label="Profile load ho raha hai..." size="small" />
-          )}
-
-          {!selectedEmployee && (
-            <p style={{ color: '#888' }}>Select an employee above to view their profile.</p>
-          )}
-
-          {employeeProfile && (
-            <div style={styles.section}>
-              {/* Header */}
-              <div style={{ marginBottom: '20px' }}>
-                <h3 style={{ marginBottom: '4px' }}>{employeeProfile.employee.name}</h3>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-                  <p style={{ color: '#888', fontSize: '13px', margin: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
-                    <Phone size={12} /> {employeeProfile.employee.phone || '—'} &nbsp;•&nbsp;
-                    Salary: <strong style={{ color: '#1a1a2e' }}>₹{employeeProfile.employee.monthly_salary}/month</strong> &nbsp;•&nbsp;
-                    Per day: ₹{Math.round(employeeProfile.employee.monthly_salary / 30)}
-                  </p>
-                  <button
-                    onClick={() => {
-                      setShowSalaryEdit(f => !f)
-                      setSalaryEditForm({ new_salary: employeeProfile.employee.monthly_salary, reason: '', effective_date: today })
-                    }}
-                    style={{
-                      backgroundColor: showSalaryEdit ? '#e74c3c' : '#f39c12',
-                      color: '#fff', border: 'none', padding: '8px 16px',
-                      borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold'
-                    }}
-                  >
-                    {showSalaryEdit ? <><X size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Cancel</> : <><Pencil size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Edit Salary</>}
-                  </button>
-                </div>
-
-                {showSalaryEdit && (
-                  <form onSubmit={handleSalaryUpdate} style={{
-                    marginTop: '16px', backgroundColor: '#fff9e6', border: '1px solid #ffc107',
-                    borderRadius: '8px', padding: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end'
-                  }}>
-                    <div>
-                      <label style={styles.label}>Nai Monthly Salary (₹) *</label>
-                      <input
-                        style={{ ...styles.input, maxWidth: '180px', fontSize: '18px', fontWeight: 'bold' }}
-                        type="number" placeholder="e.g. 12000"
-                        value={salaryEditForm.new_salary}
-                        onChange={e => setSalaryEditForm(f => ({ ...f, new_salary: e.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <label style={styles.label}>Effective Date</label>
-                      <input
-                        style={{ ...styles.input, maxWidth: '170px' }}
-                        type="date" value={salaryEditForm.effective_date || today}
-                        onChange={e => setSalaryEditForm(f => ({ ...f, effective_date: e.target.value }))}
-                      />
-                    </div>
-                    <div style={{ flex: 1, minWidth: '200px' }}>
-                      <label style={styles.label}>Reason (optional)</label>
-                      <input
-                        style={styles.input} placeholder="e.g. Promotion, performance bonus..."
-                        value={salaryEditForm.reason}
-                        onChange={e => setSalaryEditForm(f => ({ ...f, reason: e.target.value }))}
-                      />
-                    </div>
-                    <LoadingButton
-                      type="submit" loading={salaryEditLoading}
-                      style={{
-                        backgroundColor: '#27ae60', color: '#fff', border: 'none',
-                        padding: '10px 20px', borderRadius: '6px',
-                        fontSize: '14px', fontWeight: 'bold'
-                      }}
-                    >
-                      <CheckCircle2 size={13} /> Update Salary
-                    </LoadingButton>
-                  </form>
-                )}
-              </div>
-
-              {/* Month/Year selector hataya — Profile ab hamesha all-time (join
-                  date se ab tak) data dikhata hai, isliye period-select ki
-                  zaroorat nahi rahi. */}
-
-              {/* Stats */}
-              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginBottom: '20px' }}>
-                <div style={styles.statBox}>
-                  <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Wallet size={12} /> Salary Earned — Total ({employeeProfile.effective_days} din)
-                  </div>
-                  <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#27ae60' }}>
-                    + ₹{Math.abs(employeeProfile.salary_earned)}
-                  </div>
-                </div>
-
-                <div style={styles.statBox}>
-                  <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <ArrowUpFromLine size={12} /> Advance Given
-                  </div>
-                  <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#e74c3c' }}>
-                    - ₹{Math.abs(employeeProfile.total_advance_paid)}
-                  </div>
-                </div>
-
-                <div style={{
-                  ...styles.statBox,
-                  backgroundColor: employeeProfile.net_payable >= 0 ? '#f0fff4' : '#fff5f5',
-                  border: `1px solid ${employeeProfile.net_payable >= 0 ? '#c3e6cb' : '#fdd'}`
-                }}>
-                  <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    {employeeProfile.net_payable >= 0 ? <><CheckCircle2 size={12} /> Net Payable to Employee</> : <><AlertTriangle size={12} /> Employee Owes Back</>}
-                  </div>
-                  <div style={{
-                    fontSize: '26px', fontWeight: 'bold',
-                    color: employeeProfile.net_payable >= 0 ? '#27ae60' : '#e74c3c'
-                  }}>
-                    {employeeProfile.net_payable >= 0 ? '+' : '-'} ₹{Math.abs(employeeProfile.net_payable)}
-                  </div>
-                </div>
-              </div>
-
-              {/* Payment history */}
-              <h4 style={{ marginBottom: '12px' }}>Payment History</h4>
-              {employeeProfile.payment_history.length === 0 ? (
-                <p style={{ color: '#888' }}>No payments recorded yet.</p>
-              ) : (
-                <div style={styles.tableScroll}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>Date</th>
-                      <th style={styles.th}>Type</th>
-                      <th style={styles.th}>Description</th>
-                      <th style={styles.th}>Mode</th>
-                      <th style={styles.th}>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {employeeProfile.payment_history.map((p, i) => (
-                      <tr key={i} style={styles.tr}
-                        onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
-                        onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}
-                      >
-                        <td style={styles.td}>
-                          {/* FIX: display stored timestamp directly without re-parsing through Date() */}
-                          <div>{p.date || '—'}</div>
-                          {p.created_at && (
-                            <div style={{ fontSize: '11px', color: '#aaa', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                              <Clock size={10} /> {fmtDT(p.created_at)}
-                            </div>
-                          )}
-                        </td>
-                        <td style={styles.td}>
-                          <span style={{
-                            ...styles.badge,
-                            backgroundColor: p.type === 'advance' ? '#f39c12' : '#27ae60',
-                            display: 'inline-flex', alignItems: 'center', gap: '4px'
-                          }}>
-                            {p.type === 'advance' ? <><Banknote size={11} /> Advance</> : <><Wallet size={11} /> Salary</>}
-                          </span>
-                        </td>
-                        <td style={styles.td}>{p.description || '—'}</td>
-                        <td style={styles.td}>
-                          <span style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                            {p.payment_mode === 'cash' ? <><Banknote size={11} /> Cash</>
-                              : p.upi_account ? <><Smartphone size={11} /> {p.upi_account}</>
-                              : <><Banknote size={11} /> Cash</>}
-                          </span>
-                        </td>
-                        <td style={styles.td}>
-                          <strong style={{ color: p.type === 'advance' ? '#e74c3c' : '#27ae60' }}>
-                            {p.type === 'advance' ? '- ' : '+ '}₹{p.amount}
-                          </strong>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
-              )}
+                Load Calendar
+              </LoadingButton>
             </div>
-          )}
-        </div>
-      )}
-    </div>
+
+            {calendarEmployee && (
+              <>
+                <div className="flex gap-5 flex-wrap mb-4 text-xs text-slate-300">
+                  <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded bg-emerald-500 inline-block" /> Present</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded bg-red-500 inline-block" /> Absent</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded bg-amber-500 inline-block" /> Half Day</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded bg-slate-700 inline-block" /> Not Marked</span>
+                </div>
+
+                <div className="bg-slate-950 border border-slate-800 p-5 rounded-2xl">
+                  <h4 className="text-center text-white font-bold mb-4">
+                    {calendarEmployee.name} — {new Date(2000, parseInt(calendarMonth) - 1).toLocaleString('en-IN', { month: 'long' })} {calendarYear}
+                  </h4>
+                  <div className="grid grid-cols-7 gap-1.5 mb-4">
+                    {dayLabels.map(d => (
+                      <div key={d} className="text-center text-xs font-bold text-slate-500 py-2">{d}</div>
+                    ))}
+                    {Array.from({ length: firstDay }).map((_, i) => (
+                      <div key={`empty-${i}`} className="h-[60px]" />
+                    ))}
+                    {Array.from({ length: daysInMonth }).map((_, i) => {
+                      const day = i + 1
+                      const status = getDayStatus(day)
+                      const bg = status === 'present' ? 'bg-emerald-600 text-white'
+                        : status === 'absent' ? 'bg-red-600 text-white'
+                        : status === 'half_day' ? 'bg-amber-600 text-white'
+                        : 'bg-slate-800 text-slate-500'
+                      return (
+                        <div key={day} className={`h-[60px] rounded-xl flex flex-col items-center justify-center ${bg}`}>
+                          <div className="text-sm font-bold">{day}</div>
+                          {status && <div className="text-base mt-0.5">{status === 'present' ? '✓' : status === 'absent' ? '✗' : '½'}</div>}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {attendanceCalendar.length > 0 && (
+                    <div className="flex justify-around bg-slate-900 border border-slate-800 p-4 rounded-xl flex-wrap gap-3">
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-xl font-bold text-emerald-400">{attendanceCalendar.filter(r => r.status === 'present').length}</span>
+                        <span className="text-xs text-slate-400">Present</span>
+                      </div>
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-xl font-bold text-red-400">{attendanceCalendar.filter(r => r.status === 'absent').length}</span>
+                        <span className="text-xs text-slate-400">Absent</span>
+                      </div>
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-xl font-bold text-amber-400">{attendanceCalendar.filter(r => r.status === 'half_day').length}</span>
+                        <span className="text-xs text-slate-400">Half Day</span>
+                      </div>
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-xl font-bold text-white">{attendanceCalendar.length}</span>
+                        <span className="text-xs text-slate-400">Total Marked</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </Card>
+        )}
+
+        {/* ── TAB: SALARY ── */}
+        {activeTab === 'salary' && (
+          <Card>
+            <h3 className="text-white font-bold mb-4 flex items-center gap-2"><Wallet className="w-4 h-4" /> Salary Calculator</h3>
+            <div className="flex gap-3 flex-wrap items-end mb-5">
+              <div>
+                <label className={labelClasses}>Employee</label>
+                <select
+                  className={`${inputClasses} min-w-[200px]`}
+                  value={selectedEmployee?.id || ''}
+                  onChange={e => {
+                    const emp = employees.find(em => em.id === parseInt(e.target.value))
+                    setSelectedEmployee(emp)
+                    setSalaryData(null)
+                  }}
+                >
+                  <option value="">Select Employee</option>
+                  {employees.map(emp => (<option key={emp.id} value={emp.id}>{emp.name}</option>))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClasses}>Month</label>
+                <select className={`${inputClasses} min-w-[140px]`} value={salaryMonth} onChange={e => setSalaryMonth(e.target.value)}>
+                  {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m, i) => (
+                    <option key={m} value={m}>{new Date(2000, i).toLocaleString('en-IN', { month: 'long' })}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClasses}>Year</label>
+                <select className={`${inputClasses} min-w-[100px]`} value={salaryYear} onChange={e => setSalaryYear(e.target.value)}>
+                  {['2024', '2025', '2026', '2027'].map(y => (<option key={y} value={y}>{y}</option>))}
+                </select>
+              </div>
+              <LoadingButton
+                loading={salaryCalcLoading}
+                onClick={() => {
+                  if (!selectedEmployee) return
+                  setSalaryCalcLoading(true)
+                  fetchSalary(selectedEmployee.id, salaryMonth, salaryYear)
+                }}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25"
+              >
+                Calculate
+              </LoadingButton>
+            </div>
+
+            {salaryData && (
+              <div className="bg-slate-950 border border-slate-800 p-5 rounded-2xl">
+                <h3 className="text-white font-bold mb-4">
+                  {salaryData.employee_name} — {new Date(2000, parseInt(salaryMonth) - 1).toLocaleString('en-IN', { month: 'long' })} {salaryYear}
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-5">
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-center">
+                    <div className="text-[11px] text-slate-400 mb-1.5">Monthly Salary</div>
+                    <div className="text-lg font-bold text-white font-mono">₹{salaryData.monthly_salary}</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-center">
+                    <div className="text-[11px] text-slate-400 mb-1.5">Per Day Rate</div>
+                    <div className="text-lg font-bold text-white font-mono">₹{salaryData.per_day_salary}</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-center">
+                    <div className="text-[11px] text-slate-400 mb-1.5">Present Days</div>
+                    <div className="text-lg font-bold text-emerald-400 font-mono">{salaryData.present_days}</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-center">
+                    <div className="text-[11px] text-slate-400 mb-1.5">Half Days</div>
+                    <div className="text-lg font-bold text-amber-400 font-mono">{salaryData.half_days}</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-center">
+                    <div className="text-[11px] text-slate-400 mb-1.5">Absent Days</div>
+                    <div className="text-lg font-bold text-red-400 font-mono">{salaryData.absent_days}</div>
+                  </div>
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl text-center">
+                    <div className="text-[11px] text-slate-400 mb-1.5">Deduction</div>
+                    <div className="text-lg font-bold text-red-400 font-mono">- ₹{salaryData.deduction}</div>
+                  </div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between mb-4">
+                  <span className="text-sm text-slate-300">Payable Salary</span>
+                  <strong className="text-2xl font-bold text-emerald-400 font-mono">₹{salaryData.calculated_salary}</strong>
+                </div>
+
+                {/* CREDIT SALARY */}
+                <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
+                  <h4 className="text-white font-bold mb-3 flex items-center gap-2"><Send className="w-4 h-4" /> Credit This Salary</h4>
+
+                  <div className="mb-3">
+                    <label className={labelClasses}>Payment Mode</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setSalaryPaymentMode('cash'); setSalaryUpiAccount('') }}
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                          salaryPaymentMode === 'cash' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+                        }`}
+                      >
+                        <Banknote className="w-3.5 h-3.5" /> Cash
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSalaryPaymentMode('upi')}
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                          salaryPaymentMode === 'upi' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+                        }`}
+                      >
+                        <Smartphone className="w-3.5 h-3.5" /> UPI
+                      </button>
+                    </div>
+                  </div>
+
+                  {salaryPaymentMode === 'upi' && (
+                    <div className="mb-3">
+                      <label className={labelClasses}>UPI Account *</label>
+                      <select className={`${inputClasses} max-w-[280px]`} value={salaryUpiAccount} onChange={e => setSalaryUpiAccount(e.target.value)}>
+                        <option value="">Select UPI Account</option>
+                        {UPI_ACCOUNTS.map(acc => (<option key={acc} value={acc}>{acc}</option>))}
+                      </select>
+                    </div>
+                  )}
+
+                  {salaryPaymentMode === 'cash' && noteTrackingEnabled && (
+                    <DenominationCounter
+                      context="expense"
+                      availableNotes={availableNotes}
+                      onApply={(total, counts) => setSalaryDenomination(counts)}
+                    />
+                  )}
+
+                  <LoadingButton
+                    onClick={handleCreditSalary}
+                    loading={crediting}
+                    loadingText="Crediting..."
+                    className="mt-3 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Credit ₹{salaryData.calculated_salary} to {selectedEmployee?.name}
+                  </LoadingButton>
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* ── TAB: PROFILE ── */}
+        {activeTab === 'profile' && (
+          <div className="space-y-5">
+            {/* Employee selector chips */}
+            <div className="flex gap-2 flex-wrap">
+              {employees.map(emp => (
+                <button
+                  key={emp.id}
+                  onClick={() => loadEmployeeProfile(emp)}
+                  className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold border transition-all ${
+                    selectedEmployee?.id === emp.id ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+                  }`}
+                >
+                  <EmployeeAvatar employee={emp} size={6} />
+                  {emp.name}
+                </button>
+              ))}
+            </div>
+
+            {profileError && (
+              <p className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-xl text-sm">{profileError}</p>
+            )}
+
+            {!employeeProfile && selectedEmployee && !profileError && (
+              <SectionLoader label="Loading profile..." size="small" />
+            )}
+
+            {!selectedEmployee && (
+              <p className="text-slate-500 text-sm">Select an employee above to view their profile.</p>
+            )}
+
+            {employeeProfile && (
+              <Card>
+                <div className="flex items-start gap-4 mb-5">
+                  <EmployeeAvatar employee={employeeProfile.employee} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <div>
+                        <h3 className="text-xl font-bold text-white">{employeeProfile.employee.name}</h3>
+                        <p className="text-xs text-slate-400 flex items-center flex-wrap gap-1.5 mt-1">
+                          <Phone className="w-3 h-3" /> {employeeProfile.employee.phone || '—'}
+                          <span>•</span>
+                          Salary: <strong className="text-slate-200">₹{employeeProfile.employee.monthly_salary}/month</strong>
+                          <span>•</span>
+                          Per day: ₹{Math.round(employeeProfile.employee.monthly_salary / 30)}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setShowSalaryEdit(f => !f)
+                          setSalaryEditForm({ new_salary: employeeProfile.employee.monthly_salary, reason: '', effective_date: today })
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                          showSalaryEdit ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-amber-600 hover:bg-amber-500 text-white'
+                        }`}
+                      >
+                        {showSalaryEdit ? <><X className="w-3.5 h-3.5" /> Cancel</> : <><Pencil className="w-3.5 h-3.5" /> Edit Salary</>}
+                      </button>
+                    </div>
+
+                    {showSalaryEdit && (
+                      <form onSubmit={handleSalaryUpdate} className="mt-4 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex gap-3 flex-wrap items-end">
+                        <div>
+                          <label className={labelClasses}>New Monthly Salary (₹) *</label>
+                          <input
+                            className={`${inputClasses} max-w-[180px] font-bold`}
+                            type="number" placeholder="e.g. 12000"
+                            value={salaryEditForm.new_salary}
+                            onChange={e => setSalaryEditForm(f => ({ ...f, new_salary: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClasses}>Effective Date</label>
+                          <input
+                            className={`${inputClasses} max-w-[170px]`}
+                            type="date" value={salaryEditForm.effective_date || today}
+                            onChange={e => setSalaryEditForm(f => ({ ...f, effective_date: e.target.value }))}
+                          />
+                        </div>
+                        <div className="flex-1 min-w-[200px]">
+                          <label className={labelClasses}>Reason (optional)</label>
+                          <input
+                            className={inputClasses} placeholder="e.g. Promotion, performance bonus..."
+                            value={salaryEditForm.reason}
+                            onChange={e => setSalaryEditForm(f => ({ ...f, reason: e.target.value }))}
+                          />
+                        </div>
+                        <LoadingButton
+                          type="submit" loading={salaryEditLoading}
+                          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Update Salary
+                        </LoadingButton>
+                      </form>
+                    )}
+                  </div>
+                </div>
+
+                {/* Stats — Profile always shows all-time data (join date to now) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                    <div className="text-[11px] text-slate-400 mb-1.5 flex items-center gap-1.5">
+                      <Wallet className="w-3 h-3" /> Salary Earned — Total ({employeeProfile.effective_days} days)
+                    </div>
+                    <div className="text-xl font-bold text-emerald-400 font-mono">+ ₹{Math.abs(employeeProfile.salary_earned)}</div>
+                  </div>
+                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                    <div className="text-[11px] text-slate-400 mb-1.5 flex items-center gap-1.5">
+                      <ArrowUpFromLine className="w-3 h-3" /> Advance Given
+                    </div>
+                    <div className="text-xl font-bold text-red-400 font-mono">- ₹{Math.abs(employeeProfile.total_advance_paid)}</div>
+                  </div>
+                  <div className={`p-4 rounded-xl border ${employeeProfile.net_payable >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+                    <div className="text-[11px] text-slate-400 mb-1.5 flex items-center gap-1.5">
+                      {employeeProfile.net_payable >= 0 ? <><CheckCircle2 className="w-3 h-3" /> Net Payable to Employee</> : <><AlertTriangle className="w-3 h-3" /> Employee Owes Back</>}
+                    </div>
+                    <div className={`text-2xl font-bold font-mono ${employeeProfile.net_payable >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {employeeProfile.net_payable >= 0 ? '+' : '-'} ₹{Math.abs(employeeProfile.net_payable)}
+                    </div>
+                  </div>
+                </div>
+
+                <h4 className="text-white font-bold mb-3 flex items-center gap-2"><IndianRupee className="w-4 h-4" /> Payment History</h4>
+                {employeeProfile.payment_history.length === 0 ? (
+                  <p className="text-slate-500 text-sm">No payments recorded yet.</p>
+                ) : (
+                  <Table minWidth="600px">
+                    <THead>
+                      <Th>Date</Th>
+                      <Th>Type</Th>
+                      <Th>Description</Th>
+                      <Th>Mode</Th>
+                      <Th>Amount</Th>
+                    </THead>
+                    <TBody>
+                      {employeeProfile.payment_history.map((p, i) => (
+                        <Tr key={i}>
+                          <Td>
+                            <div className="text-slate-300">{p.date || '—'}</div>
+                            {p.created_at && (
+                              <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                <Clock className="w-2.5 h-2.5" /> {fmtDT(p.created_at)}
+                              </div>
+                            )}
+                          </Td>
+                          <Td>
+                            <Badge tone={p.type === 'advance' ? 'amber' : 'emerald'} icon={p.type === 'advance' ? Banknote : Wallet}>
+                              {p.type === 'advance' ? 'Advance' : 'Salary'}
+                            </Badge>
+                          </Td>
+                          <Td className="text-slate-300">{p.description || '—'}</Td>
+                          <Td className="text-slate-300">
+                            <span className="inline-flex items-center gap-1.5">
+                              {p.payment_mode === 'upi' && p.upi_account
+                                ? <><Smartphone className="w-3 h-3" /> {p.upi_account}</>
+                                : <><Banknote className="w-3 h-3" /> Cash</>}
+                            </span>
+                          </Td>
+                          <Td>
+                            <strong className={`font-mono ${p.type === 'advance' ? 'text-red-400' : 'text-emerald-400'}`}>
+                              {p.type === 'advance' ? '- ' : '+ '}₹{p.amount}
+                            </strong>
+                          </Td>
+                        </Tr>
+                      ))}
+                    </TBody>
+                  </Table>
+                )}
+              </Card>
+            )}
+          </div>
+        )}
+      </div>
     </PageLock>
   )
-}
-
-function attendanceColor(status) {
-  return status === 'present' ? '#27ae60' : status === 'absent' ? '#e74c3c' : '#f39c12'
-}
-
-const styles = {
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-  addBtn: { backgroundColor: '#1a1a2e', color: '#fff', border: '1px solid #1a1a2e', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' },
-  message: { backgroundColor: '#e8f5e9', color: '#2e7d32', padding: '10px 16px', borderRadius: '6px', marginBottom: '16px', cursor: 'pointer' },
-  formBox: { backgroundColor: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
-  formRow: { display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' },
-  input: { width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', boxSizing: 'border-box' },
-  label: { fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' },
-  submitBtn: { backgroundColor: '#1a1a2e', color: '#fff', border: '1px solid #1a1a2e', padding: '10px 24px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' },
-  tabRow: { display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' },
-  tab: { padding: '10px 20px', borderRadius: '8px', border: '1px solid #ddd', backgroundColor: '#fff', cursor: 'pointer', fontSize: '14px' },
-  activeTab: { backgroundColor: '#1a1a2e', color: '#fff', border: '1px solid #1a1a2e' },
-  section: { backgroundColor: '#fff', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-  attendanceHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' },
-  tableScroll: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
-  table: { width: '100%', minWidth: '650px', borderCollapse: 'collapse', backgroundColor: '#fff', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-  th: { padding: '12px 16px', textAlign: 'left', backgroundColor: '#f8f8f8', fontSize: '13px', color: '#555', borderBottom: '1px solid #eee' },
-  td: { padding: '12px 16px', fontSize: '14px', borderBottom: '1px solid #f0f0f0' },
-  tr: { backgroundColor: '#fff' },
-  statusBtns: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
-  statusBtn: { padding: '6px 14px', borderRadius: '20px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' },
-  actionBtn: { backgroundColor: '#fff', color: '#1a1a2e', border: '1px solid #1a1a2e', padding: '5px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
-  badge: { padding: '3px 10px', borderRadius: '12px', color: '#fff', fontSize: '12px' },
-  legend: { display: 'flex', gap: '20px', marginBottom: '16px', flexWrap: 'wrap' },
-  legendItem: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' },
-  legendDot: { width: '14px', height: '14px', borderRadius: '3px', display: 'inline-block' },
-  calendarBox: { backgroundColor: '#f8f8f8', padding: '20px', borderRadius: '12px' },
-  calendarGrid: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', marginBottom: '16px' },
-  dayLabel: { textAlign: 'center', fontSize: '12px', fontWeight: 'bold', color: '#888', padding: '8px 0' },
-  emptyCell: { height: '60px' },
-  dayCell: { height: '60px', borderRadius: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
-  dayNumber: { fontSize: '14px', fontWeight: 'bold' },
-  dayStatus: { fontSize: '16px', marginTop: '2px' },
-  calendarSummary: { display: 'flex', justifyContent: 'space-around', backgroundColor: '#fff', padding: '16px', borderRadius: '8px', flexWrap: 'wrap', gap: '12px' },
-  summaryItem: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' },
-  summaryLabel: { fontSize: '12px', color: '#888' },
-  salaryCard: { backgroundColor: '#f8f8f8', padding: '24px', borderRadius: '12px' },
-  salaryGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '20px' },
-  salaryItem: { backgroundColor: '#fff', padding: '16px', borderRadius: '8px', textAlign: 'center' },
-  salaryLabel: { fontSize: '12px', color: '#888', marginBottom: '6px' },
-  salaryValue: { fontSize: '20px', fontWeight: 'bold', color: '#1a1a2e' },
-  salaryTotal: { backgroundColor: '#fff', padding: '20px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '18px' },
-  statBox: { backgroundColor: '#f8f8f8', padding: '16px 20px', borderRadius: '8px', minWidth: '160px' },
 }
 
 export default Employees

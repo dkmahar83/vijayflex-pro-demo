@@ -1,6 +1,6 @@
 import { useState, useEffect, Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import Navbar from './components/Navbar'
+import AppLayout from './components/AppLayout'
 import Login from './pages/Login'
 import { verifyToken } from './services/api'
 
@@ -20,14 +20,7 @@ const UpiQR = lazy(() => import('./pages/UpiQR'))
 
 function PageLoader() {
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '60vh',
-      color: '#1a1a24',
-      fontSize: '16px'
-    }}>
+    <div className="flex items-center justify-center min-h-[60vh] text-slate-400 text-base">
       Loading...
     </div>
   )
@@ -36,7 +29,6 @@ function PageLoader() {
 function App() {
   const [user, setUser] = useState(null)
   const [checking, setChecking] = useState(true)
-  const [contentMargin, setContentMargin] = useState(220)
 
   useEffect(() => {
     const token = localStorage.getItem('flexshop_token')
@@ -76,16 +68,8 @@ function App() {
 
   if (checking) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        backgroundColor: '#f5f5fa',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}>
-        <div style={{ color: '#1a1a24', fontSize: '18px' }}>
-          🖨️ Loading VijayFlex Pro...
-        </div>
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-slate-300 text-lg">🖨️ Loading VijayFlex Pro...</div>
       </div>
     )
   }
@@ -96,14 +80,7 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Navbar user={user} onLogout={handleLogout} onLayoutChange={setContentMargin} />
-      <div style={{
-        marginLeft: `${contentMargin}px`,
-        transition: 'margin-left 0.2s ease',
-        padding: '24px',
-        minHeight: '100vh',
-        backgroundColor: '#f5f5fa'
-      }}>
+      <AppLayout user={user} onLogout={handleLogout}>
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -121,7 +98,7 @@ function App() {
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Suspense>
-      </div>
+      </AppLayout>
     </BrowserRouter>
   )
 }

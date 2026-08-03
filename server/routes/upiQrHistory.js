@@ -17,10 +17,13 @@ router.post('/', requireAuth, (req, res) => {
   if (!upi_account || !upi_id || !amount) {
     return res.status(400).json({ error: 'upi_account, upi_id aur amount required hain.' })
   }
+
+  const createdAt = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).replace('T', ' ')
+
   db.run(
-    `INSERT INTO upi_qr_history (upi_account, upi_id, payee_name, amount, remarks, paid)
-     VALUES (?, ?, ?, ?, ?, 0)`,
-    [upi_account, upi_id, payee_name || '', amount, remarks || ''],
+    `INSERT INTO upi_qr_history (upi_account, upi_id, payee_name, amount, remarks, paid, created_at)
+     VALUES (?, ?, ?, ?, ?, 0, ?)`,
+    [upi_account, upi_id, payee_name || '', amount, remarks || '', createdAt],
     function (err) {
       if (err) return res.status(500).json({ error: err.message })
       db.get(`SELECT * FROM upi_qr_history WHERE id = ?`, [this.lastID], (err2, row) => {

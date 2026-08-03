@@ -28,6 +28,12 @@ function daysFromNow(n) { const d = new Date(); d.setDate(d.getDate() + n); retu
 function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 function randFloat(min, max) { return Math.random() * (max - min) + min; }
 function weightedMode(cashProb = 0.8) { return Math.random() < cashProb ? 'cash' : 'upi'; }
+function prevMonthYear() {
+  const d = new Date();
+  d.setDate(1); // month-end overflow se bachne ke liye pehle date 1 pe le aao
+  d.setMonth(d.getMonth() - 1);
+  return { month: d.toLocaleString('en-US', { month: 'long' }), year: String(d.getFullYear()) };
+}
 
 async function seedDemoData() {
   if (process.env.SEED_DEMO_DATA !== 'true') return;
@@ -91,6 +97,24 @@ async function seedDemoData() {
       }
     }
 
+    // ── EMPLOYEE SALARY CREDITS ── (pichle mahine ki salary already paid dikhao)
+    // NOTE: getLiveCashBalance() ye table dekhta hi nahi (sirf payments/cash_income/
+    // expenses dekhta hai), isliye ye totalCashCollected ko touch NAHI karta —
+    // safe hai, cash balance calc pe koi asar nahi padega.
+    const { month: prevMonth, year: prevYear } = prevMonthYear();
+    const salaryCredits = [
+      { key: 'ravi', paidDaysAgo: randInt(28, 33), mode: 'cash' },
+      { key: 'sunita', paidDaysAgo: randInt(28, 33), mode: 'cash' },
+      { key: 'manoj', paidDaysAgo: randInt(28, 33), mode: 'upi' },
+    ];
+    for (const s of salaryCredits) {
+      const emp = employeesData.find(e => e.key === s.key);
+      await runAsync(
+        `INSERT INTO employee_salary_credits (employee_id, month, year, salary_amount, credited_date, notes, payment_mode, upi_account) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [eid[s.key], prevMonth, prevYear, emp.monthly_salary, fmtDate(daysAgo(s.paidDaysAgo)), `${prevMonth} salary`, s.mode, s.mode === 'upi' ? 'Demo UPI Account 1' : null]
+      );
+    }
+
     // ── VENDORS ──
     const vendorsData = [
       { key: 'bansal', name: 'Bansal Flex Supplies', phone: '9444455556', shop_type: 'Flex Roll Supplier', city: 'Jaipur' },
@@ -127,6 +151,25 @@ async function seedDemoData() {
     await runAsync(`UPDATE vendors SET total_purchased = ?, total_paid = ?, balance_due = ? WHERE id = ?`, [bansalPurchase, bansalPaid, bansalPurchase - bansalPaid, vid.bansal]);
     await runAsync(`UPDATE vendors SET total_purchased = ?, total_paid = 0, balance_due = ? WHERE id = ?`, [cityChemPurchase, cityChemPurchase, vid.city_chem]);
     await runAsync(`UPDATE vendors SET total_purchased = ?, total_paid = 0, balance_due = ? WHERE id = ?`, [nationalPurchase, nationalPurchase, vid.national]);
+
+    // ── CASH DRAWER BASELINE ── (shop ka starting cash count — sabse purani
+    // cash-relevant transaction se pehle set hona ZAROORI hai, warna
+    // getLiveCashBalance() us se pehle ki har cash entry ko ignore kar dega
+    // aur balance galat/kam dikhega. Sabse purani seeded cash transaction
+    // "Rent" expense hai, jo fixed daysAgo(20) pe hai — isliye baseline ko
+    // 25 din pehle set kar rahe hain, taaki har transaction iske baad aaye.)
+    const denomCounts = {
+      '500': randInt(3, 7),
+      '200': randInt(2, 5),
+      '100': randInt(5, 10),
+      '50': randInt(3, 6),
+      '20': randInt(2, 5),
+      '10': randInt(2, 6),
+    };
+    await runAsync(
+      `INSERT INTO cash_drawer_baseline (denomination_counts, set_at, notes) VALUES (?, ?, ?)`,
+      [JSON.stringify(denomCounts), fmtDateTime(daysAgo(25)), 'Demo opening cash count']
+    );
 
     // ── ORDERS (with items + payments + PROPERLY LINKED advance) ──
     async function insertAdvanceRecord(customerKey, orderId, amount, mode, date) {
@@ -211,7 +254,7 @@ async function seedDemoData() {
         followUpDays: randInt(-1, 1), createdDaysAgo: randInt(2, 4) },
       { customerKey: 'sharma', description: 'Diwali offer banner', status: 'delivered',
         items: [{ item_name: 'Flex 200GSM', qtyRange: [25, 35], unit_price: 28 }],
-        advanceOverride: 0, discountAmount: randInt(20, 60), discountNote: 'Round-off',
+        discountAmount: randInt(20, 60), discountNote: 'Round-off',
         followUpDays: randInt(-4, -1), createdDaysAgo: randInt(10, 14) },
     ];
 
@@ -219,7 +262,20 @@ async function seedDemoData() {
     for (const t of orderTemplates) {
       const items = t.items.map(i => ({ item_name: i.item_name, quantity: randInt(i.qtyRange[0], i.qtyRange[1]), unit_price: i.unit_price }));
       const total = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
-      const advancePaid = t.advanceOverride !== undefined ? t.advanceOverride : Math.round(total * randFloat(0.3, 0.65));
+
+      // FIX: "delivered" ka matlab hai maal customer ko de diya gaya — isliye
+      // business ne bhi poora paisa le liya hona chahiye. Pehle delivered orders
+      // pe bhi random 30-65% advance lagta tha (baaki balance_due pending reh jaata
+      // tha), jo demo mein confusing lagta tha. Ab delivered order hamesha
+      // fully-paid (balance_due = 0) banta hai — poora total ek hi "advance"
+      // payment ke roop mein collect hota hai (jaise ready-hote hi customer ne
+      // aakar pura paisa de diya).
+      let advancePaid;
+      if (t.status === 'delivered') {
+        advancePaid = total - (t.discountAmount || 0);
+      } else {
+        advancePaid = t.advanceOverride !== undefined ? t.advanceOverride : Math.round(total * randFloat(0.3, 0.65));
+      }
       const advancePaymentMode = advancePaid > 0 ? (t.modeOverride || weightedMode(0.8)) : null;
 
       const extraPayments = [];
@@ -279,6 +335,27 @@ async function seedDemoData() {
       if (ci.mode === 'cash') totalCashCollected += ci.amount;
     }
 
+    // ── CUSTOMER PAYMENTS ── (customer-wide repayment ledger, Customer Profile page ke liye)
+    // NOTE: cashBalance.js ka getLiveCashBalance() ye table include NAHI karta
+    // (sirf payments/cash_income/expenses dekhta hai) — isliye yahan
+    // totalCashCollected mein add NAHI kar rahe. Agar add karte to expense
+    // budget galat tarike se inflate ho jaata bina actual tracked cash badhe.
+    const customerPaymentsData = [
+      { key: 'gupta', pct: randFloat(0.3, 0.5), daysAgoRange: [12, 18], mode: 'cash', note: 'Opening balance ka partial payment' },
+      { key: 'mehta', pct: randFloat(0.4, 0.7), daysAgoRange: [8, 14], mode: 'upi', note: 'Opening balance ka partial payment' },
+    ];
+    for (const cp of customerPaymentsData) {
+      const openingBal = customersData.find(x => x.key === cp.key).opening_balance || 0;
+      if (openingBal <= 0) continue;
+      const amount = Math.round(openingBal * cp.pct);
+      if (amount <= 0) continue;
+      const date = daysAgo(randInt(cp.daysAgoRange[0], cp.daysAgoRange[1]));
+      await runAsync(
+        `INSERT INTO customer_payments (customer_id, amount, payment_mode, payment_date, source, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [cid[cp.key], amount, cp.mode, fmtDate(date), 'opening_balance', cp.note, fmtDateTime(date)]
+      );
+    }
+
     // ── EXPENSES ──
     // IMPORTANT: expenses ka total budget ab totalCashCollected ke ek safe
     // fraction (55%-75%) tak hi capped hai — isliye Cash Drawer ka
@@ -305,7 +382,8 @@ async function seedDemoData() {
     }
 
     // ── INVENTORY ── (quantities randomize taaki low-stock warnings bhi kabhi kabhi trigger ho)
-    await runAsync(`INSERT INTO inventory_flex (brand, size_ft, quantity, unit) VALUES ('Flex King', 8, ?, 'roll')`, [randInt(8, 15)]);
+    const flexKing8Qty = randInt(8, 15);
+    const flexKing8 = await runAsync(`INSERT INTO inventory_flex (brand, size_ft, quantity, unit) VALUES ('Flex King', 8, ?, 'roll')`, [flexKing8Qty]);
     await runAsync(`INSERT INTO inventory_flex (brand, size_ft, quantity, unit) VALUES ('Flex King', 10, ?, 'roll')`, [randInt(1, 5)]);
     await runAsync(`INSERT INTO inventory_flex (brand, size_ft, quantity, unit) VALUES ('SuperPrint', 6, 0, 'roll')`);
 
@@ -318,8 +396,31 @@ async function seedDemoData() {
     await runAsync(`INSERT INTO inventory_frames (frame_type, size, design, quantity) VALUES ('Wooden', '12x18', 'Classic', ?)`, [randInt(6, 14)]);
     await runAsync(`INSERT INTO inventory_frames (frame_type, size, design, quantity) VALUES ('Plastic', '8x10', 'Modern', 0)`);
 
-    await runAsync(`INSERT INTO inventory_ink (item_name, item_type, quantity, unit, minimum_level) VALUES ('Cyan Ink', 'ink', ?, 'litre', 2)`, [randInt(2, 6)]);
+    const cyanInkQty = randInt(2, 6);
+    const cyanInk = await runAsync(`INSERT INTO inventory_ink (item_name, item_type, quantity, unit, minimum_level) VALUES ('Cyan Ink', 'ink', ?, 'litre', 2)`, [cyanInkQty]);
     await runAsync(`INSERT INTO inventory_ink (item_name, item_type, quantity, unit, minimum_level) VALUES ('Black Solvent', 'solvent', ?, 'litre', 2)`, [randInt(1, 3)]);
+
+    // ── INVENTORY LOG ── (Dashboard Recent Activity mein "Restocked" events
+    // dikhane ke liye — seed ke direct INSERTs upar inventory ke actual
+    // add-stock route se nahi gaye the, isliye inventory_log khud-ba-khud
+    // nahi bharta. Yahan 2 sample restock-events daal rahe hain jo actual
+    // seed ki hui item_id se link hain.)
+    await runAsync(
+      `INSERT INTO inventory_log (table_name, item_id, item_name, action, quantity_changed, quantity_before, quantity_after, notes, created_at) VALUES (?, ?, ?, 'add', ?, 0, ?, 'Initial stock', ?)`,
+      ['inventory_flex', flexKing8.lastID, 'Flex King 8ft', flexKing8Qty, flexKing8Qty, fmtDateTime(daysAgo(5))]
+    );
+    await runAsync(
+      `INSERT INTO inventory_log (table_name, item_id, item_name, action, quantity_changed, quantity_before, quantity_after, notes, created_at) VALUES (?, ?, ?, 'add', ?, 0, ?, 'Initial stock', ?)`,
+      ['inventory_ink', cyanInk.lastID, 'Cyan Ink', cyanInkQty, cyanInkQty, fmtDateTime(daysAgo(2))]
+    );
+
+    // ── DAILY RECORDS ── (day-closing summary log — last 3 din ke simple rollup)
+    for (const d of [1, 2, 3]) {
+      await runAsync(
+        `INSERT INTO daily_records (record_date, total_sales, total_expenses, notes) VALUES (?, ?, ?, ?)`,
+        [fmtDate(daysAgo(d)), randInt(1500, 4500), randInt(200, 1200), null]
+      );
+    }
 
     // ── SETTINGS ──
     await runAsync(

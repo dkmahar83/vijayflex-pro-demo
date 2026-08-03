@@ -58,6 +58,21 @@ db.serialize(() => {
     value TEXT NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  // Notification "read" tracker — notifications khud kisi table mein store
+  // nahi hote (live data se har request pe generate hote hain: follow-ups,
+  // low-stock, attendance-reminder), isliye "read" state ko ek deterministic
+  // key (jaise "followup-42-2026-08-03") ke against store karte hain. Key
+  // ke andar hi date hoti hai, isliye agla din automatically fresh/unread ho
+  // jaata hai — jab tak underlying cheez (jaise balance due) resolve na ho.
+  db.run(`CREATE TABLE IF NOT EXISTS notification_reads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    notification_key TEXT NOT NULL UNIQUE,
+    notif_date TEXT NOT NULL,
+    read_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_notification_reads_date ON notification_reads(notif_date)`);
+
   db.run(`CREATE TABLE IF NOT EXISTS order_photos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER NOT NULL,
@@ -211,6 +226,32 @@ db.serialize(() => {
     daily_record_id INTEGER,
     FOREIGN KEY (daily_record_id) REFERENCES daily_records(id)
   )`);
+
+  // 8b. COMMISSION INCOME — jab customer ko inflated bill (e.g. ₹5000) ke against
+  // sirf real kaam (e.g. ₹500) hota hai, baaki extra amount (₹4500) ka kuch % hum
+  // apne paas rakh lete hain (income) aur baaki wapis karte hain (expense, category
+  // 'Commission' expenses table mein — wahi paisa nikalta hai). Ye table sirf us
+  // "rakhe hue" % ko income ke roop mein track karta hai — customer ke due/balance
+  // par iska koi asar nahi (wo paisa customer ko wapis nahi karna), sirf apni
+  // internal visibility/reporting ke liye. expense_id se us return-expense se link
+  // hota hai jo isi transaction se saath mein bana tha (agar bana).
+  db.run(`CREATE TABLE IF NOT EXISTS commission_income (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    gross_amount REAL NOT NULL,
+    percent REAL,
+    amount REAL NOT NULL,
+    return_amount REAL NOT NULL DEFAULT 0,
+    expense_id INTEGER,
+    note TEXT,
+    transaction_date TEXT DEFAULT CURRENT_DATE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (customer_id) REFERENCES customers(id),
+    FOREIGN KEY (expense_id) REFERENCES expenses(id)
+  )`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_commission_income_customer_id ON commission_income(customer_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_commission_income_expense_id ON commission_income(expense_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_commission_income_transaction_date ON commission_income(transaction_date)`);
 
   // 9. FLEX INVENTORY
   db.run(`CREATE TABLE IF NOT EXISTS flex_inventory (
@@ -433,6 +474,8 @@ db.serialize(() => {
   db.run(`ALTER TABLE customers ADD COLUMN deleted_at DATETIME DEFAULT NULL`, () => {})
   // Add photo_path column for customer photo upload feature
   db.run(`ALTER TABLE customers ADD COLUMN photo_path TEXT DEFAULT NULL`, () => {})
+  // Add photo_path column for employee photo upload feature
+  db.run(`ALTER TABLE employees ADD COLUMN photo_path TEXT DEFAULT NULL`, () => {})
   // Opening Balance ab order nahi — customer record pe seedha field. Order
   // banne se status/follow-up/items jaisi cheezein attach ho jaati thi jo
   // iske liye meaningless hain (khud "delivered" kaise hoga ek khata?).

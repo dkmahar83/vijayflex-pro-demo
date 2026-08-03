@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { getLiveCashBalance } = require('../utils/cashBalance');
 
 function nowIST() {
   return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).replace('T', ' ');
@@ -86,20 +87,65 @@ router.post('/return', (req, res) => {
       const date = transaction_date || todayIST();
       const createdAt = nowIST();
 
-      db.run(
-        `INSERT INTO commission_transactions
-           (customer_id, type, amount, return_mode, return_upi_account, cheque_number, bank_name, note, transaction_date, created_at)
-         VALUES (?, 'return', ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [customer_id, parseInt(amount), return_mode || 'cash',
-         return_mode === 'upi' ? return_upi_account : null,
-         return_mode === 'cheque' ? (cheque_number || null) : null,
-         return_mode === 'cheque' ? (bank_name || null) : null,
-         note || null, date, createdAt],
-        function(err) {
+      function insertCommissionReturn() {
+        db.run(
+          `INSERT INTO commission_transactions
+             (customer_id, type, amount, return_mode, return_upi_account, cheque_number, bank_name, note, transaction_date, created_at)
+           VALUES (?, 'return', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [customer_id, parseInt(amount), return_mode || 'cash',
+           return_mode === 'upi' ? return_upi_account : null,
+           return_mode === 'cheque' ? (cheque_number || null) : null,
+           return_mode === 'cheque' ? (bank_name || null) : null,
+           note || null, date, createdAt],
+          function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            const commissionTxnId = this.lastID;
+
+            // Cheque returns don't move physical cash immediately — no matching
+            // expense row for those. For cash/UPI, mirror into `expenses` (category
+            // 'Commission') so Cash Drawer, Daily Ledger, and monthly reports all
+            // reflect this money actually leaving — without this, a commission
+            // return here never reduced the live galla balance anywhere.
+            if (return_mode === 'cheque') {
+              return res.status(201).json({ id: commissionTxnId, message: 'Commission return ho gaya' });
+            }
+
+            db.get(`SELECT firm_name FROM customers WHERE id = ?`, [customer_id], (err, cust) => {
+              if (err) return res.status(500).json({ error: err.message });
+
+              db.run(`
+                INSERT INTO expenses
+                  (category, amount, expense_date, description, payment_mode, upi_account, created_at, customer_id, customer_name)
+                VALUES ('Commission', ?, ?, ?, ?, ?, ?, ?, ?)
+              `, [
+                parseInt(amount), date,
+                note || 'Commission returned to customer',
+                return_mode || 'cash',
+                return_mode === 'upi' ? return_upi_account : null,
+                createdAt, customer_id, cust ? cust.firm_name : null
+              ], (err) => {
+                if (err) return res.status(500).json({ error: err.message });
+                res.status(201).json({ id: commissionTxnId, message: 'Commission return ho gaya' });
+              });
+            });
+          }
+        );
+      }
+
+      // Cash return se pehle live galla balance check
+      if ((return_mode || 'cash') === 'cash') {
+        getLiveCashBalance((err, cashBalance) => {
           if (err) return res.status(500).json({ error: err.message });
-          res.status(201).json({ id: this.lastID, message: 'Commission return ho gaya' });
-        }
-      );
+          if (parseInt(amount) > cashBalance) {
+            return res.status(400).json({
+              error: `Galla mein sirf ₹${cashBalance} cash hai — ₹${amount} commission cash mein return nahi ho sakta (₹${(parseInt(amount) - cashBalance).toFixed(0)} kam hai).`
+            });
+          }
+          insertCommissionReturn();
+        });
+      } else {
+        insertCommissionReturn();
+      }
     }
   );
 });

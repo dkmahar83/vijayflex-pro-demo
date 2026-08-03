@@ -35,6 +35,11 @@ export const verifyToken = (token) =>
 // Dashboard
 export const getDashboard = () => api.get('/dashboard')
 
+// Notifications
+export const getNotifications = () => api.get('/notifications')
+export const markNotificationRead = (key) => api.post('/notifications/read', { key })
+export const markAllNotificationsRead = (keys) => api.post('/notifications/read-all', { keys })
+
 // Customers
 export const getCustomers = (search) => api.get('/customers', { params: search ? { search } : {} })
 export const createCustomer = (data) => api.post('/customers', data)
@@ -81,6 +86,14 @@ export const markAttendance = (data) => api.post('/employees/attendance', data)
 export const getAttendance = (employeeId, params) => api.get(`/employees/attendance/${employeeId}`, { params })
 export const getSalary = (employeeId, params) => api.get(`/employees/salary/${employeeId}`, { params })
 export const generateSalary = (data) => api.post('/employees/generate-salary', data)
+export const uploadEmployeePhoto = (id, file) => {
+  const formData = new FormData()
+  formData.append('photo', file)
+  return api.post(`/employees/${id}/photo`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}
+export const deleteEmployeePhoto = (id) => api.delete(`/employees/${id}/photo`)
 
 // Daily Sales
 export const getDailySales = (params) => api.get('/daily', { params })
@@ -223,6 +236,11 @@ export const getCommissionBalance = (customerId) =>
 export const creditCommission = (data) => api.post('/commission/credit', data)
 export const returnCommission = (data) => api.post('/commission/return', data)
 
+// Commission Income (the % kept as shop income — paired with the "Commission"
+// expense category, which is the amount returned to the customer)
+export const getCommissionIncome = (params) => api.get('/commission-income', { params })
+export const getCommissionIncomeSummary = (params) => api.get('/commission-income/summary', { params })
+
 // Backup
 export const downloadBackup = () => api.get('/backup/download', { responseType: 'blob' })
 
@@ -234,5 +252,4 @@ export const deleteUpiQrHistory = (id) => api.delete(`/upi-qr-history/${id}`)
 export const clearUpiQrHistory = () => api.delete('/upi-qr-history')
 
 export default api 
-// force rebuild 
- 
+// force rebuild

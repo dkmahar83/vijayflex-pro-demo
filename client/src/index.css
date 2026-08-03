@@ -1,24 +1,38 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+@import "tailwindcss";
+
+/*
+  ── VijayFlex Pro design tokens ──
+  Single source of truth for brand color + the digital-clock font.
+  Everything else (spacing, radius, typography, slate/blue/emerald/amber/red
+  palette) intentionally uses Tailwind's own built-in scale so the whole app
+  shares one consistent system — no per-page invented values.
+*/
+@theme {
+  --color-brand: #e94560;
+  --color-brand-dark: #c81d4f;
+  --font-digital: 'DSEG7 Classic', 'Courier New', monospace;
 }
 
-body {
-  font-family: Arial, sans-serif;
-  background-color: #f5f5f5;
-  color: #333;
+html, body {
+  overflow-x: hidden;
 }
-/* Mobile sidebar hide by default */
-@media (max-width: 768px) {
-  nav > div:first-child { /* sidebar */
-    transform: translateX(-220px);
-  }
-  div[style*="marginLeft: 220px"] {
-    margin-left: 0 !important;
-    padding-top: 68px !important;
-  }
-  div[style*="display: none"] {
-    display: flex !important;
-  }
+
+/* Hide scrollbars on the sidebar nav list without hiding scroll behavior */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes vf-fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.vf-fade-in {
+  animation: vf-fade-in .35s ease both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vf-fade-in { animation: none; }
 }

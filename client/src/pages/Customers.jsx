@@ -3,6 +3,13 @@ import { getCustomers, createCustomer, deleteCustomer, updateCustomer } from '..
 import { useNavigate } from 'react-router-dom'
 import LoadingButton from '../components/LoadingButton'
 import SectionLoader from '../components/SectionLoader'
+import PageHeader from '../components/ui/PageHeader'
+import Card from '../components/ui/Card'
+import { PrimaryButton, SecondaryButton } from '../components/ui/Button'
+import { Table, THead, Th, TBody, Tr, Td } from '../components/ui/Table'
+import { Plus, X, Search, Pencil, Trash2 } from 'lucide-react'
+
+const inputClasses = 'bg-slate-800/80 border border-slate-700/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 px-3.5 py-2.5 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/80 w-full min-w-0 disabled:opacity-50 disabled:cursor-not-allowed'
 
 function Customers() {
   const navigate = useNavigate()
@@ -14,18 +21,16 @@ function Customers() {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
 
-  // Inline row-edit — jahan "Edit" click hua wahi khulta hai, top pe nahi
+  // Inline row-edit — opens directly under the row that was clicked, not at the top.
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({ firm_name: '', contact_name: '', phone: '' })
   const [editSubmitting, setEditSubmitting] = useState(false)
-  
 
   useEffect(() => {
     fetchCustomers()
   }, [search]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Message ab khud 4 sec baad gayab ho jaata hai — pehle sirf click-karke
-  // hatao tha.
+  // Message now auto-clears after 4s instead of requiring a manual click to dismiss.
   useEffect(() => {
     if (!message) return
     const timer = setTimeout(() => setMessage(''), 4000)
@@ -105,171 +110,170 @@ function Customers() {
   }
 
   return (
-    <div>
-      <div style={styles.header}>
-        <h2>Customers</h2>
-        <button style={styles.addBtn} onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ Add Customer'}
-        </button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Customers"
+        subtitle="Manage client details and contact information"
+        actions={
+          showForm ? (
+            <SecondaryButton icon={X} onClick={() => setShowForm(false)}>Cancel</SecondaryButton>
+          ) : (
+            <PrimaryButton icon={Plus} onClick={() => setShowForm(true)}>Add Customer</PrimaryButton>
+          )
+        }
+      />
 
       {message && (
-        <p style={styles.message} onClick={() => setMessage('')}>{message}</p>
+        <p
+          onClick={() => setMessage('')}
+          className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-4 py-3 rounded-xl cursor-pointer text-sm"
+        >
+          {message}
+        </p>
       )}
 
       {showForm && (
-        <div style={styles.formBox}>
-          <h3 style={{ marginBottom: '16px' }}>New Customer</h3>
-          <form onSubmit={handleAddCustomer}>
-            <div style={styles.formRow}>
-              <input
-                style={styles.input}
-                placeholder="Firm / Shop Name *"
-                name="firm_name"
-                value={form.firm_name}
-                onChange={handleFormChange}
-              />
-              <input
-                style={styles.input}
-                placeholder="Contact Person Name"
-                name="contact_name"
-                value={form.contact_name}
-                onChange={handleFormChange}
-              />
-              <input
-                style={styles.input}
-                placeholder="Phone Number"
-                name="phone"
-                value={form.phone}
-                onChange={handleFormChange}
-              />
-            </div>
-            <LoadingButton loading={submitting} style={styles.submitBtn} type="submit">
+        <Card>
+          <h3 className="text-white font-bold mb-4">New Customer</h3>
+          <form onSubmit={handleAddCustomer} className="flex flex-col sm:flex-row gap-3">
+            <input
+              className={inputClasses}
+              placeholder="Firm / Shop Name *"
+              name="firm_name"
+              value={form.firm_name}
+              onChange={handleFormChange}
+            />
+            <input
+              className={inputClasses}
+              placeholder="Contact Person Name"
+              name="contact_name"
+              value={form.contact_name}
+              onChange={handleFormChange}
+            />
+            <input
+              className={inputClasses}
+              placeholder="Phone Number"
+              name="phone"
+              value={form.phone}
+              onChange={handleFormChange}
+            />
+            <LoadingButton
+              loading={submitting}
+              type="submit"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25 shrink-0"
+            >
               Save Customer
             </LoadingButton>
           </form>
-        </div>
+        </Card>
       )}
 
-      <input
-        style={styles.searchInput}
-        placeholder="Search by firm name, contact or phone..."
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-      />
+      <Card className="!p-4">
+        <div className="relative">
+          <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            className={`${inputClasses} pl-10`}
+            placeholder="Search by firm name, contact or phone..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+      </Card>
 
       {loading ? (
-        <SectionLoader label="Customers load ho rahe hain..." />
+        <SectionLoader label="Loading customers..." />
       ) : customers.length === 0 ? (
-        <p style={{ color: '#888' }}>No customers found.</p>
+        <p className="text-slate-500 text-sm">No customers found.</p>
       ) : (
-        <div style={styles.tableScroll}>
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>#</th>
-              <th style={styles.th}>Firm Name</th>
-              <th style={styles.th}>Contact Person</th>
-              <th style={styles.th}>Phone</th>
-              <th style={styles.th}>Added On</th>
-              <th style={styles.th}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {customers.map((c, index) => (
-              <Fragment key={c.id}>
-                <tr
-                  style={styles.tr}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}
-                >
-                  <td style={styles.td}>{index + 1}</td>
-                  <td style={styles.td}>
-                    <strong
-                      onClick={() => navigate(`/customers/${c.id}`)}
-                      style={{ cursor: 'pointer', color: '#3498db' }}
-                    >
-                      {c.firm_name}
-                    </strong>
-                  </td>
-                  <td style={styles.td}>{c.contact_name || '—'}</td>
-                  <td style={styles.td}>{c.phone || '—'}</td>
-                  <td style={styles.td}>{new Date(c.created_at).toLocaleDateString('en-IN')}</td>
-                  <td style={styles.td}>
-                    <div style={{ display: 'flex', gap: '6px' }}>
+        <Card padded={false} className="overflow-hidden">
+          <Table minWidth="650px">
+            <THead>
+              <Th className="pl-4">#</Th>
+              <Th>Firm Name</Th>
+              <Th>Contact Person</Th>
+              <Th>Phone</Th>
+              <Th>Added On</Th>
+              <Th className="pr-4">Actions</Th>
+            </THead>
+            <TBody>
+              {customers.map((c, index) => (
+                <Fragment key={c.id}>
+                  <Tr>
+                    <Td className="pl-4 text-slate-400">{index + 1}</Td>
+                    <Td>
                       <button
-                        onClick={() => editingId === c.id ? cancelEdit() : startEdit(c)}
-                        style={styles.editBtn}
+                        onClick={() => navigate(`/customers/${c.id}`)}
+                        className="font-bold text-blue-400 hover:text-blue-300 hover:underline text-left"
                       >
-                        {editingId === c.id ? 'Cancel' : 'Edit'}
+                        {c.firm_name}
                       </button>
-                      <button onClick={() => handleDelete(c.id, c.firm_name)} style={styles.deleteBtn}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                    </Td>
+                    <Td className="text-slate-300">{c.contact_name || '—'}</Td>
+                    <Td className="text-slate-300">{c.phone || '—'}</Td>
+                    <Td className="text-slate-400">{new Date(c.created_at).toLocaleDateString('en-IN')}</Td>
+                    <Td className="pr-4">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => editingId === c.id ? cancelEdit() : startEdit(c)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700/80 transition-all"
+                        >
+                          {editingId === c.id ? <><X className="w-3 h-3" /> Cancel</> : <><Pencil className="w-3 h-3" /> Edit</>}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(c.id, c.firm_name)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-all"
+                        >
+                          <Trash2 className="w-3 h-3" /> Delete
+                        </button>
+                      </div>
+                    </Td>
+                  </Tr>
 
-                {/* Inline edit-form — usi row ke neeche khulta hai, top pe nahi jaata */}
-                {editingId === c.id && (
-                  <tr>
-                    <td colSpan="6" style={{ padding: 0, borderBottom: '1px solid #f0f0f0' }}>
-                      <form onSubmit={e => handleEditSubmit(e, c.id)} style={styles.editRow}>
-                        <input
-                          style={styles.input}
-                          placeholder="Firm / Shop Name *"
-                          name="firm_name"
-                          value={editForm.firm_name}
-                          onChange={handleEditChange}
-                        />
-                        <input
-                          style={styles.input}
-                          placeholder="Contact Person Name"
-                          name="contact_name"
-                          value={editForm.contact_name}
-                          onChange={handleEditChange}
-                        />
-                        <input
-                          style={styles.input}
-                          placeholder="Phone Number"
-                          name="phone"
-                          value={editForm.phone}
-                          onChange={handleEditChange}
-                        />
-                        <LoadingButton loading={editSubmitting} style={styles.submitBtn} type="submit">
-                          Save Changes
-                        </LoadingButton>
-                      </form>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-        </div>
+                  {/* Inline edit form — opens directly under this row */}
+                  {editingId === c.id && (
+                    <tr>
+                      <td colSpan="6" className="p-0 bg-slate-800/30 border-b border-slate-800">
+                        <form onSubmit={e => handleEditSubmit(e, c.id)} className="flex flex-col sm:flex-row gap-2.5 items-center p-4">
+                          <input
+                            className={inputClasses}
+                            placeholder="Firm / Shop Name *"
+                            name="firm_name"
+                            value={editForm.firm_name}
+                            onChange={handleEditChange}
+                          />
+                          <input
+                            className={inputClasses}
+                            placeholder="Contact Person Name"
+                            name="contact_name"
+                            value={editForm.contact_name}
+                            onChange={handleEditChange}
+                          />
+                          <input
+                            className={inputClasses}
+                            placeholder="Phone Number"
+                            name="phone"
+                            value={editForm.phone}
+                            onChange={handleEditChange}
+                          />
+                          <LoadingButton
+                            loading={editSubmitting}
+                            type="submit"
+                            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25 shrink-0 whitespace-nowrap"
+                          >
+                            Save Changes
+                          </LoadingButton>
+                        </form>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </TBody>
+          </Table>
+        </Card>
       )}
     </div>
   )
-}
-
-const styles = {
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-  addBtn: { backgroundColor: '#1a1a2e', color: '#fff', border: '1px solid #1a1a2e', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' },
-  message: { backgroundColor: '#e8f5e9', color: '#2e7d32', padding: '10px 16px', borderRadius: '6px', marginBottom: '16px', cursor: 'pointer' },
-  formBox: { backgroundColor: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
-  formRow: { display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' },
-  input: { padding: '10px 14px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', flex: '1', minWidth: '200px' },
-  submitBtn: { backgroundColor: '#1a1a2e', color: '#fff', border: '1px solid #1a1a2e', padding: '10px 24px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' },
-  searchInput: { width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', marginBottom: '16px', boxSizing: 'border-box' },
-  tableScroll: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
-  table: { width: '100%', minWidth: '650px', borderCollapse: 'collapse', backgroundColor: '#fff', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-  th: { padding: '12px 16px', textAlign: 'left', backgroundColor: '#f8f8f8', fontSize: '13px', color: '#555', borderBottom: '1px solid #eee' },
-  td: { padding: '12px 16px', fontSize: '14px', borderBottom: '1px solid #f0f0f0' },
-  tr: { backgroundColor: '#fff', transition: 'background 0.15s' },
-  deleteBtn: { backgroundColor: '#800000', color: '#fff', border: '1px solid #800000', padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
-  editBtn: { backgroundColor: '#fff', color: '#1a1a2e', border: '1px solid #1a1a2e', padding: '5px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' },
-  editRow: { display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', padding: '14px 16px', backgroundColor: '#f9f9fc' }
 }
 
 export default Customers

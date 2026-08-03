@@ -3,9 +3,14 @@ import QRCode from 'qrcode'
 import { getUpiQrHistory, addUpiQrHistory, toggleUpiQrPaid, deleteUpiQrHistory, clearUpiQrHistory } from '../services/api'
 import {
   Smartphone, Printer, ClipboardList, Check, Zap, Download,
-  RefreshCw, StickyNote, Trash2, X, CheckCircle2, Calendar,
+  RefreshCw, StickyNote, Trash2, X, CheckCircle2, Calendar, Copy,
 } from 'lucide-react'
 import SectionLoader from '../components/SectionLoader'
+import PageHeader from '../components/ui/PageHeader'
+import Card from '../components/ui/Card'
+import StatCard from '../components/ui/StatCard'
+import { SecondaryButton, IconButton } from '../components/ui/Button'
+import { Table, THead, Th, TBody, Tr, Td } from '../components/ui/Table'
 
 const UPI_ACCOUNTS = [
   { label: 'BOI Shop Account',               upi: 'boism-9950580621@boi',        name: 'Vijay Flex' },
@@ -13,6 +18,13 @@ const UPI_ACCOUNTS = [
   { label: 'PhonePe - Bhavya Printers',      upi: 'q214575569@ybl',   name: 'Bhavya Printers' },
   { label: 'Amazon Pay - Deepak',            upi: '7073580621@yapl',           name: 'Deepak' },
 ]
+
+// One dot color per account, kept distinct from the app's semantic colors
+// (blue/emerald/red/amber) since these are just visual account identifiers.
+const ACCOUNT_TONES = ['bg-indigo-500', 'bg-blue-500', 'bg-purple-500', 'bg-orange-500']
+
+const inputClasses = 'bg-slate-800/80 border border-slate-700/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 px-3.5 py-2.5 focus:outline-none focus:border-emerald-500/80 focus:ring-1 focus:ring-emerald-500/80 w-full min-w-0 disabled:opacity-50 disabled:cursor-not-allowed'
+const labelClasses = 'text-[11px] font-semibold text-slate-400 block mb-1.5'
 
 export default function UpiQR() {
   const [selectedIdx, setSelectedIdx] = useState(0)
@@ -24,10 +36,17 @@ export default function UpiQR() {
   const [history, setHistory]         = useState([])
   const [loadingHistory, setLoadingHistory] = useState(true)
   const [copied, setCopied]           = useState(false)
+  const [errorMsg, setErrorMsg]       = useState('')
 
   const acc = UPI_ACCOUNTS[selectedIdx]
 
   useEffect(() => { refreshHistory() }, [])
+
+  useEffect(() => {
+    if (!errorMsg) return
+    const timer = setTimeout(() => setErrorMsg(''), 4000)
+    return () => clearTimeout(timer)
+  }, [errorMsg])
 
   async function refreshHistory() {
     setLoadingHistory(true)
@@ -48,13 +67,13 @@ export default function UpiQR() {
   }
 
   async function generateQR() {
-    if (!amount || parseFloat(amount) <= 0) return alert('Amount daalo pehle')
+    if (!amount || parseFloat(amount) <= 0) return setErrorMsg('Enter an amount first.')
     setGenerating(true)
     try {
       const upiStr = buildUpiString()
       const url = await QRCode.toDataURL(upiStr, {
         width: 320, margin: 2,
-        color: { dark: '#1a1a2e', light: '#ffffff' },
+        color: { dark: '#0f172a', light: '#ffffff' },
         errorCorrectionLevel: 'M'
       })
       setQrUrl(url)
@@ -68,7 +87,7 @@ export default function UpiQR() {
       })
       await refreshHistory()
     } catch (e) {
-      alert('QR generate karne mein error: ' + e.message)
+      setErrorMsg('Error generating QR: ' + e.message)
     }
     setGenerating(false)
   }
@@ -92,7 +111,7 @@ export default function UpiQR() {
       await toggleUpiQrPaid(id)
       setHistory(history.map(h => h.id === id ? { ...h, paid: !h.paid } : h))
     } catch (e) {
-      alert('Update fail hua: ' + (e.response?.data?.error || e.message))
+      setErrorMsg('Update failed: ' + (e.response?.data?.error || e.message))
     }
   }
 
@@ -101,17 +120,17 @@ export default function UpiQR() {
       await deleteUpiQrHistory(id)
       setHistory(history.filter(h => h.id !== id))
     } catch (e) {
-      alert('Delete fail hua: ' + (e.response?.data?.error || e.message))
+      setErrorMsg('Delete failed: ' + (e.response?.data?.error || e.message))
     }
   }
 
   async function clearAll() {
-    if (!window.confirm('Saari history delete karni hai?')) return
+    if (!window.confirm('Delete all QR history?')) return
     try {
       await clearUpiQrHistory()
       setHistory([])
     } catch (e) {
-      alert('Clear fail hua: ' + (e.response?.data?.error || e.message))
+      setErrorMsg('Clear failed: ' + (e.response?.data?.error || e.message))
     }
   }
 
@@ -125,237 +144,242 @@ export default function UpiQR() {
   const todayTotal   = todayHistory.filter(h => h.paid).reduce((s, h) => s + h.amount, 0)
   const pendingCount = todayHistory.filter(h => !h.paid).length
 
-  const accColors = ['#1a237e','#1a73e8','#5f259f','#ff9900']
-
   return (
-    <div style={{ maxWidth: '960px', margin: '0 auto', padding: '0 0 40px' }}>
+    <div className="space-y-6">
+      <PageHeader title="UPI QR Generator" subtitle="Generate a scannable QR for quick payment collection" />
 
-      <div style={{ marginBottom: '24px' }}>
-        <h2 style={{ margin: 0, fontSize: '22px', color: '#1a1a2e', display: 'flex', alignItems: 'center', gap: '8px' }}><Smartphone size={20} /> UPI QR Generator</h2>
+      {errorMsg && (
+        <p
+          onClick={() => setErrorMsg('')}
+          className="bg-red-500/10 border border-red-500/30 text-red-400 px-4 py-3 rounded-xl cursor-pointer text-sm"
+        >
+          {errorMsg}
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard label="Today Received (Marked)" value={`₹${todayTotal.toFixed(0)}`} icon={CheckCircle2} tone="emerald" />
+        <StatCard label="Pending Confirmations" value={pendingCount} valueClassName={pendingCount > 0 ? 'text-amber-400' : 'text-emerald-400'} icon={Calendar} tone={pendingCount > 0 ? 'amber' : 'emerald'} />
+        <StatCard label="Total QRs Today" value={todayHistory.length} icon={Smartphone} tone="blue" />
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+      {/* TABS */}
+      <div className="flex gap-2 flex-wrap">
         {[
-          { label: "Today Received (Marked)", val: `₹${todayTotal.toFixed(0)}`, color: '#27ae60', bg: '#f0fdf4' },
-          { label: "Pending Confirmations",   val: pendingCount,                 color: '#f39c12', bg: '#fffbeb' },
-          { label: "Total QRs Today",         val: todayHistory.length,          color: '#3b82f6', bg: '#eff6ff' },
-        ].map(({ label, val, color, bg }) => (
-          <div key={label} style={{ flex: 1, minWidth: '140px', background: bg, border: `1px solid ${color}30`, borderRadius: '10px', padding: '14px 16px' }}>
-            <div style={{ fontSize: '22px', fontWeight: 'bold', color }}>{val}</div>
-            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>{label}</div>
-          </div>
-        ))}
+          { key: 'generator', label: 'Generate QR',       icon: Printer },
+          { key: 'history',   label: 'Payment History',   icon: ClipboardList },
+        ].map(t => {
+          const Icon = t.icon
+          const active = activeTab === t.key
+          return (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all ${
+                active ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+              }`}
+            >
+              <Icon className="w-4 h-4" /> {t.label}
+            </button>
+          )
+        })}
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
-        {[['generator',<><Printer size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Generate QR</>],['history',<><ClipboardList size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Payment History</>]].map(([key, label]) => (
-          <button key={key} onClick={() => setActiveTab(key)} style={{
-            padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer',
-            fontWeight: 600, fontSize: '14px',
-            background: activeTab === key ? '#1a1a2e' : '#fff',
-            color: activeTab === key ? '#fff' : '#555',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.08)'
-          }}>{label}</button>
-        ))}
-      </div>
-
+      {/* ══════════════════ GENERATOR ══════════════════ */}
       {activeTab === 'generator' && (
-        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: '280px' }}>
-            <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
-
-              <div style={{ marginBottom: '20px' }}>
-                <label style={ls.label}>UPI Account Select karo *</label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
-                  {UPI_ACCOUNTS.map((a, i) => (
-                    <button key={i} onClick={() => { setSelectedIdx(i); setQrUrl('') }} style={{
-                      display: 'flex', alignItems: 'center', gap: '12px',
-                      padding: '12px 14px', borderRadius: '8px', cursor: 'pointer', textAlign: 'left',
-                      border: selectedIdx === i ? `2px solid ${accColors[i]}` : '2px solid #eee',
-                      background: selectedIdx === i ? accColors[i] + '12' : '#fafafa',
-                      transition: 'all .15s'
-                    }}>
-                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: accColors[i], flexShrink: 0 }} />
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: '13px', color: '#1a1a2e' }}>{a.label}</div>
-                        <div style={{ fontSize: '11px', color: '#888', marginTop: '1px' }}>{a.upi}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
+        <div className="flex gap-5 flex-wrap items-start">
+          <Card className="flex-1 min-w-[280px]">
+            <div className="mb-5">
+              <label className={labelClasses}>Select UPI Account *</label>
+              <div className="flex flex-col gap-2 mt-1.5">
+                {UPI_ACCOUNTS.map((a, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { setSelectedIdx(i); setQrUrl('') }}
+                    className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-left border-2 transition-all ${
+                      selectedIdx === i ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-800 bg-slate-800/40 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${ACCOUNT_TONES[i] || 'bg-slate-500'}`} />
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm text-white truncate">{a.label}</div>
+                      <div className="text-[11px] text-slate-500 truncate">{a.upi}</div>
+                    </div>
+                  </button>
+                ))}
               </div>
+            </div>
 
-              <div style={{ background: '#f8f8f8', borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: '11px', color: '#888' }}>Selected UPI ID</div>
-                  <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a1a2e' }}>{acc.upi}</div>
-                </div>
-                <button onClick={copyUpiId} style={{ background: copied ? '#27ae60' : '#1a1a2e', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                  {copied ? <><Check size={12} /> Copied</> : 'Copy'}
-                </button>
+            <div className="flex items-center justify-between bg-slate-800/60 rounded-xl px-3.5 py-2.5 mb-4">
+              <div>
+                <div className="text-[11px] text-slate-500">Selected UPI ID</div>
+                <div className="font-bold text-sm text-white font-mono">{acc.upi}</div>
               </div>
-
-              <div style={{ marginBottom: '14px' }}>
-                <label style={ls.label}>Amount (₹) *</label>
-                <input
-                  type="number" placeholder="0" value={amount}
-                  onChange={e => { setAmount(e.target.value); setQrUrl('') }}
-                  style={{ ...ls.input, fontSize: '22px', fontWeight: 'bold', color: '#1a1a2e' }}
-                />
-              </div>
-
-              <div style={{ marginBottom: '20px' }}>
-                <label style={ls.label}>Remarks (Optional)</label>
-                <input placeholder="e.g. Invoice #45, Flex Order" value={remarks}
-                  onChange={e => { setRemarks(e.target.value); setQrUrl('') }}
-                  style={ls.input}
-                />
-              </div>
-
-              <button onClick={generateQR} disabled={generating || !amount} style={{
-                width: '100%', padding: '14px', borderRadius: '10px', border: 'none',
-                background: !amount ? '#ccc' : '#1a1a2e', color: '#fff',
-                fontSize: '16px', fontWeight: 700, cursor: !amount ? 'not-allowed' : 'pointer'
-              }}>
-                {generating ? 'Generating…' : <><Zap size={15} style={{ marginRight: '6px', verticalAlign: 'middle' }} />Generate QR Code</>}
+              <button
+                onClick={copyUpiId}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  copied ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+                }`}
+              >
+                {copied ? <><Check className="w-3 h-3" /> Copied</> : <><Copy className="w-3 h-3" /> Copy</>}
               </button>
+            </div>
 
-              <div style={{ marginTop: '16px', textAlign: 'center', color: '#aaa', fontSize: '11px' }}>
-                Works with GPay • PhonePe • Paytm • BHIM • all UPI apps
+            <div className="mb-4">
+              <label className={labelClasses}>Amount (₹) *</label>
+              <input
+                type="number" placeholder="0" value={amount}
+                onChange={e => { setAmount(e.target.value); setQrUrl('') }}
+                className={`${inputClasses} text-xl font-bold`}
+              />
+            </div>
+
+            <div className="mb-5">
+              <label className={labelClasses}>Remarks (Optional)</label>
+              <input
+                placeholder="e.g. Invoice #45, Flex Order" value={remarks}
+                onChange={e => { setRemarks(e.target.value); setQrUrl('') }}
+                className={inputClasses}
+              />
+            </div>
+
+            <button
+              onClick={generateQR}
+              disabled={generating || !amount}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm shadow-xl shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {generating ? 'Generating...' : <><Zap className="w-4 h-4" /> Generate QR Code</>}
+            </button>
+
+            <p className="text-center text-slate-500 text-[11px] mt-3">
+              Works with GPay • PhonePe • Paytm • BHIM • all UPI apps
+            </p>
+          </Card>
+
+          <Card className="flex-1 min-w-[280px] min-h-[400px] flex flex-col items-center justify-center text-center">
+            {!qrUrl ? (
+              <div className="text-slate-600">
+                <Smartphone className="w-14 h-14 mx-auto mb-3" />
+                <p className="text-sm text-slate-500">Choose a UPI account and amount,<br />then generate the QR.</p>
               </div>
-            </div>
-          </div>
-
-          <div style={{ flex: 1, minWidth: '280px' }}>
-            <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)', textAlign: 'center', minHeight: '400px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              {!qrUrl ? (
-                <div style={{ color: '#ccc' }}>
-                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}><Smartphone size={56} /></div>
-                  <div style={{ fontSize: '14px' }}>UPI ID aur amount choose karo,<br/>phir Generate karo</div>
+            ) : (
+              <>
+                <div className="mb-2 text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> QR Ready
                 </div>
-              ) : (
-                <>
-                  <div style={{ marginBottom: '8px', fontSize: '13px', fontWeight: 700, color: '#27ae60', display: 'flex', alignItems: 'center', gap: '5px' }}><CheckCircle2 size={14} /> QR Ready</div>
-                  <img src={qrUrl} alt="UPI QR Code" style={{ width: '240px', height: '240px', borderRadius: '12px', border: '2px solid #eee' }} />
-                  <div style={{ marginTop: '12px', fontSize: '12px', color: '#888' }}>
-                    {acc.label}<br/>
-                    <span style={{ color: '#555', fontWeight: 600 }}>{acc.upi}</span>
+                <img src={qrUrl} alt="UPI QR Code" className="w-60 h-60 rounded-2xl border-2 border-slate-800" />
+                <div className="mt-3 text-xs text-slate-400">
+                  {acc.label}<br />
+                  <span className="text-slate-300 font-semibold font-mono">{acc.upi}</span>
+                </div>
+                {remarks && (
+                  <div className="text-xs text-blue-400 mt-1.5 flex items-center justify-center gap-1.5">
+                    <StickyNote className="w-3 h-3" /> {remarks}
                   </div>
-                  {remarks && <div style={{ fontSize: '12px', color: '#3b82f6', marginTop: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}><StickyNote size={11} /> {remarks}</div>}
-                  <div style={{ display: 'flex', gap: '10px', marginTop: '16px', width: '100%', maxWidth: '280px' }}>
-                    <button onClick={downloadQR} style={{ flex: 1, padding: '10px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
-                      <Download size={13} /> Download PNG
-                    </button>
-                    <button onClick={() => { setQrUrl(''); setAmount(''); setRemarks('') }} style={{ flex: 1, padding: '10px', background: '#f3f4f6', color: '#555', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
-                      <RefreshCw size={13} /> New QR
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
+                )}
+                <div className="flex gap-2.5 mt-4 w-full max-w-[280px]">
+                  <SecondaryButton icon={Download} onClick={downloadQR} className="flex-1 justify-center">Download PNG</SecondaryButton>
+                  <SecondaryButton icon={RefreshCw} onClick={() => { setQrUrl(''); setAmount(''); setRemarks('') }} className="flex-1 justify-center">New QR</SecondaryButton>
+                </div>
+              </>
+            )}
+          </Card>
         </div>
       )}
 
+      {/* ══════════════════ HISTORY ══════════════════ */}
       {activeTab === 'history' && (
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <div style={{ fontSize: '14px', color: '#666' }}>{history.length} total entries</div>
+        <div className="space-y-6">
+          <div className="flex justify-between items-center flex-wrap gap-3">
+            <p className="text-sm text-slate-400">{history.length} total entries</p>
             {history.length > 0 && (
-              <button onClick={clearAll} style={{ background: '#fff', border: '1px solid #e74c3c', color: '#e74c3c', borderRadius: '6px', padding: '6px 14px', fontSize: '12px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                <Trash2 size={12} /> Clear All
+              <button
+                onClick={clearAll}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Clear All
               </button>
             )}
           </div>
 
           {loadingHistory ? (
-            <SectionLoader label="History load ho rahi hai..." size="large" />
+            <SectionLoader label="Loading history..." size="large" />
           ) : history.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px', color: '#aaa', background: '#fff', borderRadius: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}><ClipboardList size={36} /></div>
-              <div>Abhi koi QR generate nahi hua.<br/>Generator se pehla QR banao!</div>
+            <div className="text-center py-16 bg-slate-900 border border-slate-800 rounded-3xl">
+              <ClipboardList className="w-9 h-9 mx-auto mb-3 text-slate-700" />
+              <p className="text-slate-500 text-sm">No QR generated yet.<br />Generate your first one from the Generate QR tab!</p>
             </div>
           ) : (
-            <div>
-              {(() => {
-                const groups = {}
-                history.forEach(h => {
-                  const d = new Date(h.created_at).toDateString()
-                  if (!groups[d]) groups[d] = []
-                  groups[d].push(h)
-                })
-                return Object.entries(groups).map(([date, entries]) => {
-                  const dayTotal   = entries.filter(e => e.paid).reduce((s, e) => s + e.amount, 0)
-                  const dayPending = entries.filter(e => !e.paid).length
-                  return (
-                    <div key={date} style={{ marginBottom: '24px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                        <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a1a2e', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          {date === todayStr ? <><Calendar size={13} /> Today</> : date}
-                        </div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                          Received: <strong style={{ color: '#27ae60' }}>₹{dayTotal}</strong>
-                          {dayPending > 0 && <span style={{ color: '#f39c12', marginLeft: '8px' }}> • {dayPending} pending</span>}
-                        </div>
+            (() => {
+              const groups = {}
+              history.forEach(h => {
+                const d = new Date(h.created_at).toDateString()
+                if (!groups[d]) groups[d] = []
+                groups[d].push(h)
+              })
+              return Object.entries(groups).map(([date, entries]) => {
+                const dayTotal   = entries.filter(e => e.paid).reduce((s, e) => s + e.amount, 0)
+                const dayPending = entries.filter(e => !e.paid).length
+                return (
+                  <div key={date}>
+                    <div className="flex justify-between items-center mb-2.5">
+                      <div className="font-bold text-sm text-white flex items-center gap-1.5">
+                        {date === todayStr ? <><Calendar className="w-3.5 h-3.5" /> Today</> : date}
                       </div>
-
-                      <div style={{ background: '#fff', borderRadius: '10px', overflow: 'hidden', boxShadow: '0 1px 6px rgba(0,0,0,0.07)' }}>
-                        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                        <table style={{ width: '100%', minWidth: '650px', borderCollapse: 'collapse' }}>
-                          <thead>
-                            <tr style={{ background: '#f8f8f8' }}>
-                              {['Time','UPI Account','Amount','Remarks','Status','Action'].map(h => (
-                                <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: '12px', color: '#888', fontWeight: 600, borderBottom: '1px solid #eee' }}>{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {entries.map(e => {
-                              const aIdx = UPI_ACCOUNTS.findIndex(a => a.label === e.upi_account)
-                              const col = accColors[aIdx] || '#888'
-                              return (
-                                <tr key={e.id} style={{ borderBottom: '1px solid #f5f5f5', background: e.paid ? '#f0fdf4' : '#fff' }}>
-                                  <td style={{ padding: '10px 14px', fontSize: '13px', color: '#555', whiteSpace: 'nowrap' }}>{fmtTime(e.created_at)}</td>
-                                  <td style={{ padding: '10px 14px' }}>
-                                    <span style={{ background: col + '18', color: col, border: `1px solid ${col}40`, borderRadius: '5px', padding: '3px 8px', fontSize: '11px', fontWeight: 600 }}>
-                                      {e.upi_account.split('-')[0].trim()}
-                                    </span>
-                                    <div style={{ fontSize: '10px', color: '#aaa', marginTop: '2px' }}>{e.upi_id}</div>
-                                  </td>
-                                  <td style={{ padding: '10px 14px', fontWeight: 700, fontSize: '16px', color: '#1a1a2e' }}>₹{e.amount.toLocaleString('en-IN')}</td>
-                                  <td style={{ padding: '10px 14px', fontSize: '12px', color: '#666' }}>{e.remarks || '—'}</td>
-                                  <td style={{ padding: '10px 14px' }}>
-                                    <button onClick={() => togglePaid(e.id)} style={{
-                                      padding: '4px 12px', borderRadius: '20px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
-                                      background: e.paid ? '#27ae60' : '#f3f4f6',
-                                      color: e.paid ? '#fff' : '#555'
-                                    }}>
-                                      {e.paid ? <><Check size={12} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Received</> : 'Mark Paid'}
-                                    </button>
-                                  </td>
-                                  <td style={{ padding: '10px 14px' }}>
-                                    <button onClick={() => deleteEntry(e.id)} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: '16px', display: 'inline-flex', alignItems: 'center' }}><X size={15} /></button>
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                        </div>
+                      <div className="text-xs text-slate-400">
+                        Received: <strong className="text-emerald-400">₹{dayTotal}</strong>
+                        {dayPending > 0 && <span className="text-amber-400 ml-2"> • {dayPending} pending</span>}
                       </div>
                     </div>
-                  )
-                })
-              })()}
-            </div>
+
+                    <Card padded={false} className="overflow-hidden">
+                      <Table minWidth="650px">
+                        <THead>
+                          <Th className="pl-4">Time</Th><Th>UPI Account</Th><Th>Amount</Th>
+                          <Th>Remarks</Th><Th>Status</Th><Th className="pr-4">Action</Th>
+                        </THead>
+                        <TBody>
+                          {entries.map(e => {
+                            const aIdx = UPI_ACCOUNTS.findIndex(a => a.label === e.upi_account)
+                            const tone = ACCOUNT_TONES[aIdx] || 'bg-slate-500'
+                            return (
+                              <Tr key={e.id} className={e.paid ? 'bg-emerald-500/5' : ''}>
+                                <Td className="pl-4 text-slate-300 whitespace-nowrap">{fmtTime(e.created_at)}</Td>
+                                <Td>
+                                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                                    <span className={`w-2 h-2 rounded-full ${tone}`} />
+                                    {e.upi_account.split('-')[0].trim()}
+                                  </span>
+                                  <div className="text-[10px] text-slate-500 mt-0.5">{e.upi_id}</div>
+                                </Td>
+                                <Td className="font-bold text-base text-white font-mono">₹{e.amount.toLocaleString('en-IN')}</Td>
+                                <Td className="text-slate-400 text-xs">{e.remarks || '—'}</Td>
+                                <Td>
+                                  <button
+                                    onClick={() => togglePaid(e.id)}
+                                    className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                                      e.paid ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700/80'
+                                    }`}
+                                  >
+                                    {e.paid ? <><Check className="w-3 h-3" /> Received</> : 'Mark Paid'}
+                                  </button>
+                                </Td>
+                                <Td className="pr-4">
+                                  <IconButton icon={X} onClick={() => deleteEntry(e.id)} className="!p-1.5 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20" />
+                                </Td>
+                              </Tr>
+                            )
+                          })}
+                        </TBody>
+                      </Table>
+                    </Card>
+                  </div>
+                )
+              })
+            })()
           )}
         </div>
       )}
     </div>
   )
-}
-
-const ls = {
-  label: { fontSize: '12px', color: '#888', display: 'block', marginBottom: '5px', fontWeight: 600 },
-  input: { width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px', boxSizing: 'border-box', outline: 'none' }
 }

@@ -3,7 +3,9 @@ import { Loader2 } from 'lucide-react'
 // Poori site ke liye ek consistent loading-button — jahan bhi "Saving..." text-only
 // tha ya kuch nahi tha, wahan is se replace karenge. Existing style/color as-is
 // pass hota hai, sirf loading=true hone par spinner + disabled add hota hai.
-function LoadingButton({ loading, disabled, children, loadingText, style, ...rest }) {
+// className bhi ab pass ho sakti hai (Tailwind-based pages ke liye) — purane
+// style-only usages (jo abhi bhi baaki pages mein hain) bilkul waise hi kaam karte rahenge.
+function LoadingButton({ loading, disabled, children, loadingText, style, className, ...rest }) {
   return (
     <button
       disabled={loading || disabled}
@@ -11,9 +13,10 @@ function LoadingButton({ loading, disabled, children, loadingText, style, ...res
         ...style,
         cursor: (loading || disabled) ? 'not-allowed' : (style?.cursor || 'pointer'),
         opacity: (loading || disabled) ? 0.6 : (style?.opacity ?? 1),
-        display: 'inline-flex', alignItems: 'center',
-        justifyContent: style?.justifyContent || 'center', gap: '8px'
+        display: style?.display || 'inline-flex', alignItems: 'center',
+        justifyContent: style?.justifyContent || 'center', gap: style?.gap || '8px'
       }}
+      className={className}
       {...rest}
     >
       {loading && <Loader2 size={14} className="lb-spin" />}

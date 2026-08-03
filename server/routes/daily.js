@@ -274,6 +274,17 @@ router.get('/report', (req, res) => {
               `, [m, year], (err, totalExpenses) => {
                 if (err) return res.status(500).json({ error: err.message });
 
+                // 7b. Commission income — jitna hum extra-billing se apne paas rakhte
+                // hain (income). Ye total income mein separately add NAHI hota — wo
+                // paisa order-payments ke through already total income mein aa chuka
+                // hota hai. Sirf visibility ke liye dikhaya jaata hai.
+                db.get(`
+                  SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
+                  FROM commission_income
+                  WHERE strftime('%m', transaction_date) = ? AND strftime('%Y', transaction_date) = ?
+                `, [m, year], (err, commissionIncome) => {
+                if (err) return res.status(500).json({ error: err.message });
+
                 // 8. Dues — CUSTOMER-WISE, TRUE net-due formula (Dashboard jaisa hi:
                 // orders + opening_balance - advance - order-payments - UPI -
                 // cleared-cheques - cash-income - discount + commission).
@@ -402,7 +413,10 @@ router.get('/report', (req, res) => {
                       },
                       expenses: { by_category: expensesByCategory, total: totalExp },
                       net_profit: totalIncome - totalExp,
-                      dues: { list: dues, total_outstanding: totalDues.total || 0 }
+                      dues: { list: dues, total_outstanding: totalDues.total || 0 },
+                      // Note: ye income already order-payments ke through totalIncome
+                      // mein shaamil hai — is figure ko net_profit mein dobara mat jodna.
+                      commission_income: { total: commissionIncome.total || 0, count: commissionIncome.count || 0 }
                     });
                   });
                 });
@@ -410,6 +424,7 @@ router.get('/report', (req, res) => {
             });
           });
         });
+        }); // commissionIncome close
       });
     });
   });
@@ -507,12 +522,23 @@ router.get('/report/yearly', (req, res) => {
               const totalIncome   = summary.reduce((s, r) => s + r.income, 0);
               const totalExpenses = summary.reduce((s, r) => s + r.expenses, 0);
 
-              res.json({
-                year,
-                monthly_summary: summary,
-                total_income: totalIncome,
-                total_expenses: totalExpenses,
-                net_profit: totalIncome - totalExpenses
+              // Commission income (kept %) for the year — informational only, already
+              // counted inside total_income above via order payments, not added again.
+              db.get(`
+                SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
+                FROM commission_income
+                WHERE strftime('%Y', transaction_date) = ?
+              `, [year], (err, commissionIncome) => {
+                if (err) return res.status(500).json({ error: err.message });
+
+                res.json({
+                  year,
+                  monthly_summary: summary,
+                  total_income: totalIncome,
+                  total_expenses: totalExpenses,
+                  net_profit: totalIncome - totalExpenses,
+                  commission_income: { total: commissionIncome.total || 0, count: commissionIncome.count || 0 }
+                });
               });
             });
           });
@@ -562,10 +588,30 @@ router.post('/cash-income', (req, res) => {
 router.get('/summary', (req, res) => {
   const { month, year } = req.query;
 
+  // "Days Recorded" = distinct calendar days in the month that had ANY real
+  // activity — an order payment, cash income, UPI transaction, or expense.
+  // Earlier this counted rows in `daily_records`, a separate legacy table
+  // used only for the old manual "total sales" entry — it is not populated
+  // by any of the flows above (payments/cash_income/upi_transactions/expenses),
+  // so a day with real transactions but no manual daily_records row always
+  // showed up as 0 recorded days, like Gupta Enterprises' Aug 1 UPI payment.
   db.get(`
-    SELECT COUNT(*) as days_recorded FROM daily_records
-    WHERE strftime('%m', record_date) = ? AND strftime('%Y', record_date) = ?
-  `, [month, year], (err, daily) => {
+    SELECT COUNT(*) as days_recorded FROM (
+      SELECT DISTINCT d FROM (
+        SELECT payment_date as d FROM payments
+        WHERE strftime('%m', payment_date) = ? AND strftime('%Y', payment_date) = ?
+        UNION
+        SELECT income_date as d FROM cash_income
+        WHERE strftime('%m', income_date) = ? AND strftime('%Y', income_date) = ?
+        UNION
+        SELECT transaction_date as d FROM upi_transactions
+        WHERE strftime('%m', transaction_date) = ? AND strftime('%Y', transaction_date) = ?
+        UNION
+        SELECT expense_date as d FROM expenses
+        WHERE strftime('%m', expense_date) = ? AND strftime('%Y', expense_date) = ?
+      )
+    )
+  `, [month, year, month, year, month, year, month, year], (err, daily) => {
     if (err) return res.status(500).json({ error: err.message });
 
     // Follow-up payments

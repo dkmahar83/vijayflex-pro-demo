@@ -63,10 +63,11 @@ const groups = [
   },
 ]
 
+// Matches the Stitch reference exactly: 256px expanded / 64px collapsed rail.
 const RAIL_WIDTH = 64
-const FULL_WIDTH = 220
+const FULL_WIDTH = 256
 
-function Navbar({ user, onLogout, onLayoutChange }) {
+function Navbar({ user, onRequestLogout, onLayoutChange }) {
   const location = useLocation()
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
@@ -80,7 +81,7 @@ function Navbar({ user, onLogout, onLayoutChange }) {
     return acc
   }, {})
   const [openGroups, setOpenGroups] = useState(defaultOpen)
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+
   // Track viewport size — debounced. Continuous resize-drag ke dauraan browser
   // bahut saare resize events fire karta hai; har event pe turant setIsMobile
   // karne se baar-baar transition re-trigger hota tha, jo resize ke exact
@@ -132,94 +133,100 @@ function Navbar({ user, onLogout, onLayoutChange }) {
   const isActive = path => location.pathname === path
   const closeMobileDrawer = () => { if (isMobile) setMobileDrawerOpen(false) }
 
+  const navLinkClasses = (active) => `flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all duration-150 relative whitespace-nowrap ${
+    active
+      ? 'bg-blue-600/15 text-blue-400 border border-blue-500/30 shadow-sm'
+      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+  }`
+
   return (
     <>
       {/* Backdrop only when mobile drawer is open (overlay mode) */}
       {isMobile && mobileDrawerOpen && (
-        <div style={styles.overlay} onClick={() => setMobileDrawerOpen(false)} />
+        <div className="fixed inset-0 bg-black/50 z-[299]" onClick={() => setMobileDrawerOpen(false)} />
       )}
 
-      <div style={{ ...styles.sidebar, width: expanded ? FULL_WIDTH : RAIL_WIDTH }}>
+      <div
+        className="fixed top-0 left-0 bottom-0 bg-slate-900 border-r border-slate-800 flex flex-col z-[300] shadow-2xl overflow-hidden transition-[width] duration-200 ease-in-out"
+        style={{ width: expanded ? FULL_WIDTH : RAIL_WIDTH }}
+      >
         {/* Brand + collapse toggle */}
-        <div style={styles.brand}>
-          <Printer size={22} color="#e94560" style={{ flexShrink: 0 }} />
-          {expanded && <span style={styles.brandText}>VijayFlex Pro</span>}
+        <div className={`flex items-center border-b border-slate-800/80 ${
+          expanded ? 'gap-3 p-5' : 'flex-col gap-2 py-4 px-2'
+        }`}>
+          <div className="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25">
+            <Printer className="w-5 h-5" />
+          </div>
+          {expanded && (
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-white text-lg tracking-tight whitespace-nowrap">VijayFlex</span>
+                <span className="text-[10px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">Pro</span>
+              </div>
+              <p className="text-xs text-slate-400 whitespace-nowrap">Flex &amp; POS Terminal</p>
+            </div>
+          )}
           <button
             onClick={toggleSidebar}
-            style={{ ...styles.collapseBtn, marginLeft: expanded ? 'auto' : 0 }}
+            className="text-slate-400 hover:text-slate-200 bg-slate-800/60 hover:bg-slate-800 rounded-lg p-1 shrink-0 transition-all"
             aria-label="Toggle sidebar"
             title={expanded ? 'Collapse' : 'Expand'}
           >
-            {expanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            {expanded ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
           </button>
         </div>
 
         {/* Dashboard link */}
-        <div style={styles.dashboardWrap}>
+        <div className="p-3 pb-0">
           <Link
             to="/"
-            style={{
-              ...styles.navLink,
-              ...(expanded ? {} : styles.navLinkCollapsed),
-              ...(isActive('/') ? styles.navLinkActive : {}),
-            }}
+            className={navLinkClasses(isActive('/')) + (expanded ? '' : ' justify-center px-0')}
             onClick={closeMobileDrawer}
             title="Dashboard"
           >
-            <LayoutDashboard size={18} style={styles.linkIcon} />
+            <LayoutDashboard className={`w-4 h-4 shrink-0 ${isActive('/') ? 'text-blue-400' : 'text-slate-400'}`} />
             {expanded && <span>Dashboard</span>}
-            {expanded && isActive('/') && <span style={styles.activeDot} />}
           </Link>
         </div>
 
         {/* Nav Groups */}
-        <style>{`
-          .navlinks-scroll { scrollbar-width: none; -ms-overflow-style: none; }
-          .navlinks-scroll::-webkit-scrollbar { display: none; }
-        `}</style>
-        <nav className="navlinks-scroll" style={styles.navLinks}>
+        <nav className="no-scrollbar flex-1 overflow-y-auto overflow-x-hidden p-3 flex flex-col gap-0.5">
           {groups.map(group => {
             const GroupIcon = group.icon
             const isGroupOpen = expanded && !!openGroups[group.id]
             const hasActive = group.items.some(i => isActive(i.path))
 
             return (
-              <div key={group.id} style={styles.group}>
+              <div key={group.id} className="mb-0.5">
                 <button
-                  style={{
-                    ...styles.groupHeader,
-                    ...(expanded ? {} : styles.groupHeaderCollapsed),
-                    ...(hasActive ? styles.groupHeaderActive : {}),
-                  }}
                   onClick={() => toggleGroup(group.id)}
                   aria-expanded={isGroupOpen}
                   title={group.label}
+                  className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-transparent text-[11px] font-bold uppercase tracking-wide transition-all ${
+                    expanded ? '' : 'justify-center px-0'
+                  } ${hasActive ? 'text-slate-300' : 'text-slate-500 hover:text-slate-300'}`}
                 >
-                  <GroupIcon size={16} style={styles.groupIcon} />
-                  {expanded && <span style={styles.groupLabel}>{group.label}</span>}
+                  <GroupIcon className="w-4 h-4 shrink-0 opacity-70" />
+                  {expanded && <span className="flex-1 text-left">{group.label}</span>}
                   {expanded && (isGroupOpen
-                    ? <ChevronDown size={13} style={styles.chevron} />
-                    : <ChevronRight size={13} style={styles.chevron} />)}
+                    ? <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-50" />
+                    : <ChevronRight className="w-3.5 h-3.5 shrink-0 opacity-50" />)}
                 </button>
 
                 {isGroupOpen && (
-                  <div style={styles.groupItems}>
+                  <div className="flex flex-col gap-0.5 mb-1">
                     {group.items.map(item => {
                       const ItemIcon = item.icon
+                      const active = isActive(item.path)
                       return (
                         <Link
                           key={item.path}
                           to={item.path}
-                          style={{
-                            ...styles.navLink,
-                            ...styles.childLink,
-                            ...(isActive(item.path) ? styles.navLinkActive : {}),
-                          }}
+                          className={navLinkClasses(active) + ' pl-8 text-[13px] py-2'}
                           onClick={closeMobileDrawer}
                         >
-                          <ItemIcon size={15} style={styles.linkIcon} />
+                          <ItemIcon className={`w-4 h-4 shrink-0 ${active ? 'text-blue-400' : 'text-slate-400'}`} />
                           <span>{item.label}</span>
-                          {isActive(item.path) && <span style={styles.activeDot} />}
                         </Link>
                       )
                     })}
@@ -231,150 +238,35 @@ function Navbar({ user, onLogout, onLayoutChange }) {
         </nav>
 
         {/* Bottom: user + actions */}
-        <div style={styles.sidebarBottom}>
-          <div style={{ ...styles.userRow, justifyContent: expanded ? 'flex-start' : 'center' }}>
-            <div style={styles.userAvatar}>
+        <div className="p-3 border-t border-slate-800/80 bg-slate-900/50 flex flex-col gap-2">
+          <div className={`flex items-center gap-3 p-2.5 rounded-xl bg-slate-800/50 border border-slate-800 ${expanded ? '' : 'justify-center'}`}>
+            <div className="w-9 h-9 shrink-0 rounded-full bg-brand text-white flex items-center justify-center font-bold text-sm">
               {(user?.name || user?.username || 'U')[0].toUpperCase()}
             </div>
             {expanded && (
-              <div>
-                <div style={styles.userName}>{user?.name || user?.username}</div>
-                <div style={styles.userRole}>Admin</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-white truncate">{user?.name || user?.username}</div>
+                <div className="text-[11px] text-slate-400">Admin</div>
               </div>
             )}
           </div>
 
-          {expanded && (
-            <div style={styles.bottomActions}>
-              <BackupManager />
-            </div>
-          )}
+          {expanded && <BackupManager />}
 
           <button
-            onClick={() => setShowLogoutConfirm(true)}
-            style={{ ...styles.logoutBtn, justifyContent: expanded ? 'flex-start' : 'center' }}
+            onClick={onRequestLogout}
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-all ${
+              expanded ? '' : 'justify-center'
+            }`}
             title="Logout"
           >
-            <LogOut size={16} style={{ marginRight: expanded ? 6 : 0 }} />
+            <LogOut className="w-4 h-4 shrink-0" />
             {expanded && 'Logout'}
           </button>
         </div>
       </div>
-
-      {showLogoutConfirm && (
-        <div
-          onClick={() => setShowLogoutConfirm(false)}
-          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '24px',
-              width: '340px', maxWidth: '100%', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}
-          >
-            <h3 style={{ marginBottom: '10px', color: '#1a1a2e', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <LogOut size={17} /> Logout Karna Hai?
-            </h3>
-            <p style={{ fontSize: '13px', color: '#555', marginBottom: '20px' }}>
-              Dobara login karna padega session shuru karne ke liye.
-            </p>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => setShowLogoutConfirm(false)}
-                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ddd', backgroundColor: '#fff', cursor: 'pointer', fontSize: '14px' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => { setShowLogoutConfirm(false); onLogout() }}
-                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #800000', backgroundColor: '#800000', color: '#fff', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold' }}
-              >
-                Yes, Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
-}
-
-const styles = {
-  overlay: {
-    position: 'fixed', inset: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 299,
-  },
-  sidebar: {
-    position: 'fixed', top: 0, left: 0, bottom: 0,
-    backgroundColor: '#1a1a2e',
-    display: 'flex', flexDirection: 'column',
-    zIndex: 300, boxShadow: '2px 0 12px rgba(0,0,0,0.2)',
-    transition: 'width 0.2s ease', overflow: 'hidden',
-  },
-  brand: {
-    display: 'flex', alignItems: 'center', gap: '10px',
-    padding: '20px 14px 18px',
-    borderBottom: '1px solid rgba(255,255,255,0.08)',
-  },
-  brandText: {
-    color: '#fff', fontSize: '17px', fontWeight: 'bold',
-    whiteSpace: 'nowrap',
-  },
-  collapseBtn: {
-    background: 'rgba(255,255,255,0.06)', border: 'none', color: '#9aa3b0',
-    cursor: 'pointer', borderRadius: '6px', padding: '4px',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
-  dashboardWrap: { padding: '10px 10px 4px' },
-  navLinks: {
-    flex: 1, overflowY: 'auto', overflowX: 'hidden',
-    padding: '4px 10px 12px', display: 'flex', flexDirection: 'column', gap: '2px',
-  },
-  group: { marginBottom: '2px' },
-  groupHeader: {
-    width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
-    padding: '9px 12px', borderRadius: '8px', background: 'none', border: 'none',
-    cursor: 'pointer', color: '#6b7280', fontSize: '11px', fontWeight: '700',
-    letterSpacing: '0.6px', textTransform: 'uppercase',
-  },
-  groupHeaderCollapsed: { justifyContent: 'center', padding: '9px 0' },
-  groupHeaderActive: { color: '#c0c8d4' },
-  groupIcon: { flexShrink: 0, opacity: 0.7 },
-  groupLabel: { flex: 1, textAlign: 'left', whiteSpace: 'nowrap' },
-  chevron: { flexShrink: 0, opacity: 0.5 },
-  groupItems: { display: 'flex', flexDirection: 'column', gap: '1px', marginBottom: '4px' },
-  navLink: {
-    display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px',
-    borderRadius: '8px', color: '#9aa3b0', textDecoration: 'none',
-    fontSize: '14px', fontWeight: '500', position: 'relative', whiteSpace: 'nowrap',
-  },
-  navLinkCollapsed: { justifyContent: 'center', padding: '9px 0' },
-  childLink: { paddingLeft: '16px', fontSize: '13.5px' },
-  navLinkActive: { backgroundColor: '#2563eb', color: '#fff' },
-  linkIcon: { flexShrink: 0, width: '18px' },
-  activeDot: {
-    position: 'absolute', right: '10px', width: '6px', height: '6px',
-    borderRadius: '50%', backgroundColor: '#fff', opacity: 0.7,
-  },
-  sidebarBottom: {
-    padding: '16px 12px', borderTop: '1px solid rgba(255,255,255,0.08)',
-    display: 'flex', flexDirection: 'column', gap: '12px',
-  },
-  userRow: { display: 'flex', alignItems: 'center', gap: '10px' },
-  userAvatar: {
-    width: '36px', height: '36px', borderRadius: '50%', backgroundColor: '#e94560',
-    color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontWeight: 'bold', fontSize: '15px', flexShrink: 0,
-  },
-  userName: { color: '#fff', fontSize: '13px', fontWeight: '600' },
-  userRole: { color: '#6b7280', fontSize: '11px' },
-  bottomActions: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  logoutBtn: {
-    backgroundColor: 'transparent', border: '1px solid rgba(231,76,60,0.4)',
-    color: '#e74c3c', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer',
-    fontSize: '13px', display: 'flex', alignItems: 'center',
-  },
 }
 
 export default Navbar

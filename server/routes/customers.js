@@ -124,6 +124,14 @@ router.get('/:id', (req, res) => {
               `, [id], (err, commissionPayments) => {
                 if (err) return res.status(500).json({ error: err.message });
 
+              db.all(`
+                SELECT id, gross_amount, percent, amount, return_amount, note, transaction_date, created_at
+                FROM commission_income
+                WHERE customer_id = ?
+                ORDER BY transaction_date DESC
+              `, [id], (err, commissionIncomeRows) => {
+                if (err) return res.status(500).json({ error: err.message });
+
                 // Opening balance ab order nahi — customer.opening_balance field se
                 // seedha yahan add hota hai.
                 const totalBilled = orders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0) + Number(customer.opening_balance || 0);
@@ -143,6 +151,12 @@ router.get('/:id', (req, res) => {
                 // hai, warna Balance Due se ye paisa poora gayab ho jaata hai.
                 const totalCashIncome = cashIncomePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
                 const totalCommission = commissionPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                // Kitna commission hum apne paas rakh chuke hain is customer se (shop
+                // ka apna margin). Ye due/balance ko touch NAHI karta — customer se na
+                // lena na dena, sirf internal reporting/visibility ke liye hai. Isliye
+                // totalPaid/totalDue formula mein include nahi kiya (warna double-count
+                // ho jaayega, kyunki wo paisa already order ke total mein aa chuka tha).
+                const totalCommissionIncome = commissionIncomeRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
 
                 const totalPaid = totalAdvance + totalOrderPayments + totalUpi + totalChequeCleared + totalCashIncome;
                 const totalDue = totalBilled - totalPaid - totalDiscount + totalCommission;
@@ -178,10 +192,13 @@ router.get('/:id', (req, res) => {
                   totalChequeCleared,
                   totalCashIncome,
                   totalCommission,
+                  totalCommissionIncome,
+                  commissionIncome: commissionIncomeRows,
                   totalPaid,
                   totalDiscount,
                   totalDue
                 });
+              }); // commissionIncomeRows close
               }); // commissionPayments close
             }); // cashIncomePayments close
           }); // chequePayments close

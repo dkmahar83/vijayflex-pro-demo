@@ -5,15 +5,22 @@ import {
   getUpiTransactions, getUpiSummary, addUpiTransaction,
   getVendors, getVendor, addVendor, updateVendor, deleteVendor,
   addVendorPurchase, addVendorPayment,
-  getCustomers, getExpenses, deleteLedgerEntry, getSetting, getDenominationDrawer
+  getCustomers, getExpenses, deleteLedgerEntry, getSetting, getDenominationDrawer,
+  getCommissionIncome
 } from '../services/api'
 import DenominationCounter from '../components/DenominationCounter'
 import LoadingButton from '../components/LoadingButton'
 import SectionLoader from '../components/SectionLoader'
+import PageHeader from '../components/ui/PageHeader'
+import Card from '../components/ui/Card'
+import Badge from '../components/ui/Badge'
+import Modal from '../components/ui/Modal'
+import { PrimaryButton, SecondaryButton, IconButton } from '../components/ui/Button'
+import { Table, THead, Th, TBody, Tr, Td } from '../components/ui/Table'
 import {
-  Landmark, Receipt, Smartphone, Store, Coins, Pencil, Trash2,
+  Receipt, Smartphone, Store, Coins, Pencil, Trash2, Plus, X,
   Banknote, Building2, Inbox, CheckCircle2, XCircle, Package,
- Clock, AlertTriangle, Lightbulb,
+  Clock, AlertTriangle, Lightbulb,
 } from 'lucide-react'
 
 const UPI_ACCOUNTS = [
@@ -25,60 +32,38 @@ const UPI_ACCOUNTS = [
 
 const BANK_TYPES = ['NEFT', 'RTGS', 'IMPS', 'NACH']
 
-// ─── Small reusable modal ───────────────────────────────────────────────────
-function Modal({ title, onClose, children }) {
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: 2000, padding: '16px'
-    }}>
-      <div style={{
-        background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '520px',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.2)', overflow: 'hidden'
-      }}>
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '16px 20px', borderBottom: '1px solid #eee', background: '#f8f8f8'
-        }}>
-          <span style={{ fontWeight: 700, fontSize: '16px' }}>{title}</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#888', lineHeight: 1 }}>×</button>
-        </div>
-        <div style={{ padding: '20px' }}>{children}</div>
-      </div>
-    </div>
-  )
-}
+const inputClasses = 'bg-slate-800/80 border border-slate-700/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 px-3.5 py-2.5 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/80 w-full min-w-0 disabled:opacity-50 disabled:cursor-not-allowed'
+const labelClasses = 'text-[11px] font-semibold text-slate-400 block mb-1.5'
+
+const CHEQUE_STATUS_TONE = { received: 'amber', deposited: 'blue', cleared: 'emerald', bounced: 'red' }
+const UPI_ACCOUNT_TONE   = ['bg-indigo-500', 'bg-blue-500', 'bg-purple-500', 'bg-orange-500']
 
 // ─── Vendor form (add / edit) ───────────────────────────────────────────────
 function VendorForm({ initial, onSave, onCancel, saving }) {
   const [form, setForm] = useState(initial || { name: '', phone: '', shop_type: '', city: '', notes: '' })
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const fields = [
-    { key: 'name',      label: 'Vendor Name *',      placeholder: 'e.g. SV Traders' },
-    { key: 'phone',     label: 'Phone',               placeholder: '9876543210' },
-    { key: 'shop_type', label: 'Shop Type / Products',placeholder: 'e.g. Flex Supplier, Ink' },
-    { key: 'city',      label: 'City',                placeholder: 'e.g. Chandigarh' },
-    { key: 'notes',     label: 'Notes',               placeholder: 'Any extra details' },
+    { key: 'name',      label: 'Vendor Name *',       placeholder: 'e.g. SV Traders' },
+    { key: 'phone',     label: 'Phone',                placeholder: '9876543210' },
+    { key: 'shop_type', label: 'Shop Type / Products',  placeholder: 'e.g. Flex Supplier, Ink' },
+    { key: 'city',      label: 'City',                 placeholder: 'e.g. Chandigarh' },
+    { key: 'notes',     label: 'Notes',                placeholder: 'Any extra details' },
   ]
   return (
-    <div>
+    <div className="space-y-3">
       {fields.map(({ key, label, placeholder }) => (
-        <div key={key} style={{ marginBottom: '12px' }}>
-          <label style={styles.label}>{label}</label>
-          <input style={styles.input} placeholder={placeholder}
-            value={form[key]} onChange={e => set(key, e.target.value)} />
+        <div key={key}>
+          <label className={labelClasses}>{label}</label>
+          <input className={inputClasses} placeholder={placeholder} value={form[key]} onChange={e => set(key, e.target.value)} />
         </div>
       ))}
-      <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
-        <button onClick={onCancel} style={{ flex: 1, padding: '10px', border: '1px solid #ddd', borderRadius: '6px', background: '#fff', cursor: 'pointer' }}>
-          Cancel
-        </button>
+      <div className="flex gap-2.5 pt-1">
+        <SecondaryButton onClick={onCancel} className="flex-1 justify-center">Cancel</SecondaryButton>
         <LoadingButton
           onClick={() => form.name.trim() && onSave(form)}
           disabled={!form.name.trim()}
           loading={saving}
-          style={{ flex: 2, ...styles.submitBtn, opacity: form.name.trim() ? 1 : 0.5 }}
+          className="flex-[2] py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25"
         >
           {initial ? 'Save Changes' : 'Add Vendor'}
         </LoadingButton>
@@ -104,58 +89,44 @@ function PurchaseItemsEditor({ items, setItems }) {
   const total = items.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
 
   return (
-    <div style={{ marginBottom: '14px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-        <label style={{ ...styles.label, marginBottom: 0 }}>Purchase Items</label>
-        <button onClick={addRow} style={{
-          padding: '4px 12px', background: '#eff6ff', border: '1px solid #bfdbfe',
-          borderRadius: '6px', color: '#1d4ed8', fontWeight: 700, fontSize: '12px', cursor: 'pointer'
-        }}>+ Add Item</button>
+    <div className="mb-3.5">
+      <div className="flex justify-between items-center mb-2">
+        <label className={`${labelClasses} !mb-0`}>Purchase Items</label>
+        <button type="button" onClick={addRow} className="px-3 py-1 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-400 font-bold text-xs">+ Add Item</button>
       </div>
 
       {items.length === 0 ? (
-        <div style={{
-          textAlign: 'center', padding: '14px', border: '2px dashed #e5e7eb',
-          borderRadius: '8px', color: '#9ca3af', fontSize: '13px'
-        }}>
+        <div className="text-center py-3.5 border-2 border-dashed border-slate-700 rounded-xl text-slate-500 text-xs">
           Click "+ Add Item" to list what was purchased
         </div>
       ) : (
-        <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
-          <div style={{
-            display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 28px',
-            background: '#f3f4f6', padding: '7px 10px',
-            fontSize: '11px', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase'
-          }}>
+        <div className="border border-slate-800 rounded-xl overflow-hidden">
+          <div className="grid gap-2 px-2.5 py-1.5 bg-slate-800/60 text-[11px] font-bold text-slate-500 uppercase" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 28px' }}>
             <span>Item</span><span>Qty</span><span>Unit</span><span>Rate (₹)</span><span>Amount</span><span></span>
           </div>
           {items.map((row, i) => (
-            <div key={row.id} style={{
-              display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 28px',
-              padding: '6px 10px', borderTop: i > 0 ? '1px solid #f3f4f6' : 'none',
-              alignItems: 'center', background: i % 2 === 0 ? '#fff' : '#fafafa'
-            }}>
+            <div
+              key={row.id}
+              className={`grid gap-2 px-2.5 py-1.5 items-center ${i > 0 ? 'border-t border-slate-800/60' : ''} ${i % 2 === 0 ? 'bg-transparent' : 'bg-slate-800/20'}`}
+              style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr 28px' }}
+            >
               {[
                 { k: 'name', ph: 'Flex roll, Ink…' },
                 { k: 'qty',  ph: '2', tp: 'number' },
                 { k: 'unit', ph: 'rolls' },
                 { k: 'rate', ph: '0', tp: 'number' },
               ].map(({ k, ph, tp }) => (
-                <input key={k} type={tp || 'text'} value={row[k]} placeholder={ph}
+                <input
+                  key={k} type={tp || 'text'} value={row[k]} placeholder={ph}
                   onChange={e => update(row.id, k, e.target.value)}
-                  style={{ width: '100%', border: 'none', background: 'transparent', fontSize: '13px', outline: 'none', padding: '2px 4px' }} />
+                  className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-600 outline-none px-1 py-0.5"
+                />
               ))}
-              <span style={{ fontSize: '13px', fontWeight: 600, paddingLeft: '4px' }}>
-                {row.amount || '0'}
-              </span>
-              <button onClick={() => remove(row.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}>×</button>
+              <span className="text-sm font-semibold text-slate-200 pl-1">{row.amount || '0'}</span>
+              <button type="button" onClick={() => remove(row.id)} className="text-red-400 text-base leading-none">×</button>
             </div>
           ))}
-          <div style={{
-            display: 'flex', justifyContent: 'flex-end', padding: '8px 12px',
-            borderTop: '2px solid #e5e7eb', background: '#f9fafb',
-            fontSize: '14px', fontWeight: 700
-          }}>
+          <div className="flex justify-end px-3 py-2 border-t-2 border-slate-800 bg-slate-800/40 text-sm font-bold text-white">
             Total: ₹{total.toFixed(2)}
           </div>
         </div>
@@ -166,28 +137,40 @@ function PurchaseItemsEditor({ items, setItems }) {
 
 // ─── Payment method selector ─────────────────────────────────────────────────
 function PaymentMethodSelector({ method, setMethod, upiAccount, setUpiAccount, bankType, setBankType }) {
-  const btn = (label, val, color) => (
-    <button onClick={() => setMethod(val)} style={{
-      flex: 1, padding: '8px 4px', borderRadius: '8px',
-      border: `2px solid ${method === val ? color : '#e5e7eb'}`,
-      background: method === val ? color + '18' : '#fff',
-      color: method === val ? color : '#6b7280',
-      fontWeight: 700, fontSize: '13px', cursor: 'pointer', transition: 'all .15s'
-    }}>{label}</button>
-  )
+  const OPTIONS = [
+    { key: 'cash', label: 'Cash', icon: Banknote, tone: 'emerald' },
+    { key: 'upi',  label: 'UPI',  icon: Smartphone, tone: 'purple' },
+    { key: 'bank', label: 'Bank', icon: Building2, tone: 'blue' },
+  ]
+  const TONE_CLASSES = {
+    emerald: 'border-emerald-500 bg-emerald-500/15 text-emerald-400',
+    purple:  'border-purple-500 bg-purple-500/15 text-purple-400',
+    blue:    'border-blue-500 bg-blue-500/15 text-blue-400',
+  }
   return (
-    <div style={{ marginBottom: '14px' }}>
-      <label style={styles.label}>Payment Method</label>
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-        {btn(<><Banknote size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Cash</>, 'cash', '#16a34a')}
-        {btn(<><Smartphone size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />UPI</>,  'upi',  '#7c3aed')}
-        {btn(<><Building2 size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Bank</>, 'bank', '#1d4ed8')}
+    <div className="mb-3.5">
+      <label className={labelClasses}>Payment Method</label>
+      <div className="flex gap-2 mb-2.5">
+        {OPTIONS.map(o => {
+          const Icon = o.icon
+          const active = method === o.key
+          return (
+            <button
+              key={o.key} type="button" onClick={() => setMethod(o.key)}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 transition-all flex items-center justify-center gap-1.5 ${
+                active ? TONE_CLASSES[o.tone] : 'border-slate-700 bg-slate-800/60 text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" /> {o.label}
+            </button>
+          )
+        })}
       </div>
 
       {method === 'upi' && (
         <div>
-          <label style={styles.label}>Select UPI Account</label>
-          <select value={upiAccount} onChange={e => setUpiAccount(e.target.value)} style={styles.input}>
+          <label className={labelClasses}>Select UPI Account</label>
+          <select value={upiAccount} onChange={e => setUpiAccount(e.target.value)} className={inputClasses}>
             <option value="">-- Select Account --</option>
             {UPI_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
@@ -196,16 +179,17 @@ function PaymentMethodSelector({ method, setMethod, upiAccount, setUpiAccount, b
 
       {method === 'bank' && (
         <div>
-          <label style={styles.label}>Transfer Type</label>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <label className={labelClasses}>Transfer Type</label>
+          <div className="flex gap-2 flex-wrap">
             {BANK_TYPES.map(t => (
-              <button key={t} onClick={() => setBankType(t)} style={{
-                padding: '6px 16px', borderRadius: '20px', border: '2px solid',
-                borderColor: bankType === t ? '#1d4ed8' : '#e5e7eb',
-                background: bankType === t ? '#1d4ed8' : '#fff',
-                color: bankType === t ? '#fff' : '#374151',
-                fontWeight: 700, fontSize: '13px', cursor: 'pointer'
-              }}>{t}</button>
+              <button
+                key={t} type="button" onClick={() => setBankType(t)}
+                className={`px-4 py-1.5 rounded-full text-xs font-bold border-2 transition-all ${
+                  bankType === t ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-700 bg-slate-800/60 text-slate-300'
+                }`}
+              >
+                {t}
+              </button>
             ))}
           </div>
         </div>
@@ -230,7 +214,7 @@ function Accounts() {
   const [chequeForm, setChequeForm]       = useState({ cheque_number: '', firm_name: '', customer_id: '', bank_name: '', amount: '', received_date: '', order_id: '', notes: '' })
   const [showChequeForm, setShowChequeForm] = useState(false)
   const [selectedCheque, setSelectedCheque] = useState(null)
-  const [chequesLoading, setChequesLoading] = useState(false)  
+  const [chequesLoading, setChequesLoading] = useState(false)
   const [chequeDetail, setChequeDetail]     = useState(null)
   const [editingCheque, setEditingCheque]   = useState(false)
   const [chequeEditForm, setChequeEditForm] = useState({})
@@ -277,13 +261,13 @@ function Accounts() {
   const [payBankType, setPayBankType]   = useState('NEFT')
   const [payDenomination, setPayDenomination] = useState({})
 
-  // Note-wise Cash Tracking — global setting (Galla Hisaab tab wali hi key)
+  // Note-wise Cash Tracking — global setting (same key as the Cash Drawer tab)
   const [noteTrackingEnabled, setNoteTrackingEnabled] = useState(true)
 
   // Vendor transaction history — click-to-expand denomination breakdown
   const [expandedTxnId, setExpandedTxnId] = useState(null)
 
-  // Live drawer notes — vendor cash payment ko available notes se zyada nahi badhne dena
+  // Live drawer notes — keeps the vendor cash payment from exceeding what's in the drawer
   const [availableNotes, setAvailableNotes] = useState(null)
 
   // Customers
@@ -293,9 +277,9 @@ function Accounts() {
 
   useEffect(() => { fetchAll(); getCustomers().then(r => setCustomers(r.data)).catch(() => {}) }, [filterMonth, filterYear]) // eslint-disable-line
 
-  // notify() already 3 sec baad auto-clear karta hai — bas tab badalte hi
-  // turant clear bhi karna hai, warna "Cheque recorded" jaisa message UPI
-  // ya Vendors tab pe bhi dikh sakta tha agar 3 sec ke andar switch kiya.
+  // notify() already auto-clears after 3s — this just clears immediately on
+  // tab change too, otherwise a message like "Cheque recorded" could still
+  // show up on the UPI or Vendors tab if switched within that window.
   useEffect(() => {
     queueMicrotask(() => setMessage(''))
   }, [activeTab])
@@ -319,9 +303,17 @@ function Accounts() {
   function fetchAll()    { fetchCheques(); fetchUpi(); fetchVendors() }
   function fetchCommission() {
     setCommissionLoading(true)
-    getExpenses(filterMonth, filterYear)
-      .then(r => {
-        setCommissionEntries((r.data || []).filter(e => e.category === 'Commission'))
+    Promise.all([
+      getExpenses(filterMonth, filterYear),
+      getCommissionIncome({ month: filterMonth, year: filterYear })
+    ])
+      .then(([expRes, incomeRes]) => {
+        const incomeByExpenseId = {}
+        ;(incomeRes.data || []).forEach(row => { incomeByExpenseId[row.expense_id] = row })
+        const entries = (expRes.data || [])
+          .filter(e => e.category === 'Commission')
+          .map(e => ({ ...e, commission_income: incomeByExpenseId[e.id] || null }))
+        setCommissionEntries(entries)
         setCommissionLoading(false)
       })
       .catch(() => setCommissionLoading(false))
@@ -381,11 +373,11 @@ function Accounts() {
 
   function handleUpiDelete(e) {
     e.preventDefault()
-    if (!upiDeletePassword) return notify('Password daalo.')
+    if (!upiDeletePassword) return notify('Enter the password.')
     setUpiDeleteLoading(true)
     deleteLedgerEntry(upiDeletePassword, upiDeleteModal.type, upiDeleteModal.id)
       .then(() => {
-        notify('Entry delete ho gayi ✅')
+        notify('Entry deleted ✅')
         setUpiDeleteModal(null)
         setUpiDeletePassword('')
         fetchUpi()
@@ -469,196 +461,237 @@ function Accounts() {
   }
 
   function fmtDT(dateStr) {
-  if (!dateStr) return '—'
-  // Database se IST string aati hai "2026-06-19 12:33:15" — T laga ke parse karo
-  const normalized = dateStr.replace(' ', 'T')
-  const d = new Date(normalized); if (isNaN(d)) return dateStr
-  const ist = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }))
-  const pad = n => String(n).padStart(2, '0')
-  return `${pad(ist.getHours())}:${pad(ist.getMinutes())}:${pad(ist.getSeconds())}  ${pad(ist.getDate())}.${pad(ist.getMonth()+1)}.${ist.getFullYear()}`
-}
+    if (!dateStr) return '—'
+    // Comes from the DB as an IST string "2026-06-19 12:33:15" — add T to parse it
+    const normalized = dateStr.replace(' ', 'T')
+    const d = new Date(normalized); if (isNaN(d)) return dateStr
+    const ist = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }))
+    const pad = n => String(n).padStart(2, '0')
+    return `${pad(ist.getHours())}:${pad(ist.getMinutes())}:${pad(ist.getSeconds())}  ${pad(ist.getDate())}.${pad(ist.getMonth()+1)}.${ist.getFullYear()}`
+  }
 
-  // Denomination order — jaisa DenominationCounter.jsx mein hai, badi se choti
+  // Denomination order — same as DenominationCounter.jsx, largest to smallest
   const DENOM_ORDER = [500, 200, 100, 50, 20, 10, 5, 2, 1]
 
   function sumDenom(counts) {
     return Object.values(counts || {}).reduce((s, v) => s + (Number(v) || 0), 0)
   }
 
-  // Kya is transaction ka koi expandable breakdown hai? (sirf cash payments ke liye)
+  // Does this transaction have an expandable breakdown? (cash payments only)
   function hasBreakdown(t) {
     if (t.type !== 'payment' || !t.denomination_breakdown) return false
     const { received, returned } = t.denomination_breakdown
     return sumDenom(received) > 0 || sumDenom(returned) > 0
   }
 
-  // Chips render karo — jaise "₹500 × 2"
-  function renderDenomChips(counts, color) {
+  function renderDenomChips(counts, tone) {
     const entries = DENOM_ORDER.map(d => [d, Number(counts?.[d]) || 0]).filter(([, c]) => c > 0)
     if (entries.length === 0) return null
     return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+      <div className="flex flex-wrap gap-1.5">
         {entries.map(([d, c]) => (
-          <span key={d} style={{
-            fontSize: '11px', fontWeight: 700, padding: '3px 8px', borderRadius: '5px',
-            backgroundColor: color + '18', color
-          }}>₹{d} × {c}</span>
+          <span key={d} className={`text-[11px] font-bold px-2 py-1 rounded-md ${tone === 'emerald' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
+            ₹{d} × {c}
+          </span>
         ))}
       </div>
     )
   }
 
-  const statusColor = s => ({ received: '#f39c12', deposited: '#3498db', cleared: '#27ae60', bounced: '#e74c3c' }[s] || '#ccc')
-  const upiColor    = acc => ({ 'Demo UPI Account 1': '#1a237e', 'Demo UPI Account 2': '#1a73e8', 'Demo UPI Account 3': '#5f259f', 'Demo UPI Account 4': '#ff9900' }[acc] || '#888')
-
   const payMethodBadge = (t) => {
     if (t.type !== 'payment') return null
     const m = t.payment_method || 'cash'
-    const label = m === 'upi'  ? <><Smartphone size={10} style={{ marginRight: '3px', verticalAlign: 'middle' }} />{(t.upi_account || 'UPI').split('-')[0].trim()}</>
-                : m === 'bank' ? <><Building2 size={10} style={{ marginRight: '3px', verticalAlign: 'middle' }} />{t.bank_transfer_type || 'NEFT'}</>
-                : <><Banknote size={10} style={{ marginRight: '3px', verticalAlign: 'middle' }} />Cash</>
-    const bg = m === 'upi' ? '#7c3aed' : m === 'bank' ? '#1d4ed8' : '#16a34a'
-    return <span style={{ ...styles.badge, backgroundColor: bg, fontSize: '11px', marginLeft: '6px' }}>{label}</span>
+    if (m === 'upi') return <Badge tone="purple" icon={Smartphone} className="ml-1.5">{(t.upi_account || 'UPI').split('-')[0].trim()}</Badge>
+    if (m === 'bank') return <Badge tone="blue" icon={Building2} className="ml-1.5">{t.bank_transfer_type || 'NEFT'}</Badge>
+    return <Badge tone="emerald" icon={Banknote} className="ml-1.5">Cash</Badge>
   }
+
+  const TABS = [
+    { key: 'cheques',    label: 'Cheque Register', icon: Receipt },
+    { key: 'upi',        label: 'UPI Accounts',     icon: Smartphone },
+    { key: 'vendors',    label: 'Vendor Accounts',  icon: Store },
+    { key: 'commission', label: 'Commission',       icon: Coins },
+  ]
 
   return (
     <PageLock pageKey="accounts" pageTitle="Accounts">
-    <div>
-      <div style={styles.header}><h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Landmark size={20} /> Accounts</h2></div>
+      <div className="space-y-6">
+        <PageHeader title="Accounts" subtitle="Cheques, UPI accounts, vendor ledgers, and commission history" />
 
-      {message && <p style={styles.message} onClick={() => setMessage('')}>{message}</p>}
+        {message && (
+          <p onClick={() => setMessage('')} className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-4 py-3 rounded-xl cursor-pointer text-sm">
+            {message}
+          </p>
+        )}
 
-      {/* Month filter */}
-      <div style={styles.filterRow}>
-        <select style={{ ...styles.input, maxWidth: '150px' }} value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
-          {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m, i) => (
-            <option key={m} value={m}>{new Date(2000, i).toLocaleString('en-IN', { month: 'long' })}</option>
-          ))}
-        </select>
-        <select style={{ ...styles.input, maxWidth: '100px' }} value={filterYear} onChange={e => setFilterYear(e.target.value)}>
-          {['2024','2025','2026','2027'].map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
-      </div>
-
-      {/* Tabs */}
-      <div style={styles.tabRow}>
-        {['cheques','upi','vendors','commission'].map(tab => (
-        <button key={tab} style={{ ...styles.tab, ...(activeTab === tab ? styles.activeTab : {}) }} onClick={() => {
-          setActiveTab(tab)
-          if (tab === 'commission') fetchCommission()
-        }}>
-          {tab === 'cheques' ? <><Receipt size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Cheque Register</>
-            : tab === 'upi' ? <><Smartphone size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />UPI Accounts</>
-            : tab === 'vendors' ? <><Store size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Vendor Accounts</>
-            : <><Coins size={14} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Commission</>}
-        </button>
-      ))}
-      </div>
-
-      {/* ─── CHEQUES TAB ─── */}
-      {activeTab === 'cheques' && (
-        <div>
-          {chequesLoading && (
-            <SectionLoader label="Cheques load ho rahe hain..." size="small" />
-          )}
-          <div style={{ ...styles.summaryRow, opacity: chequesLoading ? 0.5 : 1, transition: 'opacity 0.15s' }}>
-            {chequeSummary.map(s => (
-              <div key={s.status} style={{ ...styles.summaryCard, borderTop: `4px solid ${statusColor(s.status)}` }}>
-                <div style={{ fontSize: '20px', fontWeight: 'bold', color: statusColor(s.status) }}>₹{s.total}</div>
-                <div style={{ fontSize: '12px', color: '#888', marginTop: '4px', textTransform: 'capitalize' }}>{s.status} ({s.count})</div>
-              </div>
+        {/* Month filter */}
+        <div className="flex gap-3">
+          <select className={`${inputClasses} max-w-[160px]`} value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
+            {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m, i) => (
+              <option key={m} value={m}>{new Date(2000, i).toLocaleString('en-IN', { month: 'long' })}</option>
             ))}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-            <button style={styles.addBtn} onClick={() => setShowChequeForm(!showChequeForm)}>{showChequeForm ? 'Cancel' : '+ Add Cheque'}</button>
-          </div>
-          {showChequeForm && (
-            <div style={styles.formBox}>
-              <h3 style={{ marginBottom: '16px' }}>Record New Cheque</h3>
-              <form onSubmit={handleAddCheque}>
-                <div style={styles.formRow}>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Cheque Number</label><input style={styles.input} placeholder="e.g. 123456" value={chequeForm.cheque_number} onChange={e => setChequeForm({ ...chequeForm, cheque_number: e.target.value })} /></div>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Firm / Person Name *</label><input style={styles.input} placeholder="Who gave the cheque" value={chequeForm.firm_name} onChange={e => setChequeForm({ ...chequeForm, firm_name: e.target.value })} /></div>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Link to Customer (optional)</label>
-                    <select style={styles.input} value={chequeForm.customer_id} onChange={e => setChequeForm({ ...chequeForm, customer_id: e.target.value })}>
-                      <option value="">Select Customer</option>
-                      {customers.map(c => <option key={c.id} value={c.id}>{c.firm_name}</option>)}
-                    </select>
-                  </div>
+          </select>
+          <select className={`${inputClasses} max-w-[110px]`} value={filterYear} onChange={e => setFilterYear(e.target.value)}>
+            {['2024','2025','2026','2027'].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 flex-wrap">
+          {TABS.map(t => {
+            const Icon = t.icon
+            const active = activeTab === t.key
+            return (
+              <button
+                key={t.key}
+                onClick={() => { setActiveTab(t.key); if (t.key === 'commission') fetchCommission() }}
+                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-all ${
+                  active ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+                }`}
+              >
+                <Icon className="w-4 h-4" /> {t.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* ══════════════════ CHEQUES TAB ══════════════════ */}
+        {activeTab === 'cheques' && (
+          <div className="space-y-5">
+            {chequesLoading && <SectionLoader label="Loading cheques..." size="small" />}
+
+            <div className={`grid grid-cols-2 sm:grid-cols-4 gap-4 transition-opacity ${chequesLoading ? 'opacity-50' : ''}`}>
+              {chequeSummary.map(s => (
+                <div key={s.status} className={`bg-slate-900 border-t-4 border border-slate-800 rounded-2xl p-4 ${
+                  s.status === 'received' ? 'border-t-amber-500' : s.status === 'deposited' ? 'border-t-blue-500' : s.status === 'cleared' ? 'border-t-emerald-500' : 'border-t-red-500'
+                }`}>
+                  <div className={`text-lg font-bold font-mono ${
+                    s.status === 'received' ? 'text-amber-400' : s.status === 'deposited' ? 'text-blue-400' : s.status === 'cleared' ? 'text-emerald-400' : 'text-red-400'
+                  }`}>₹{s.total}</div>
+                  <div className="text-xs text-slate-400 mt-1 capitalize">{s.status} ({s.count})</div>
                 </div>
-                <div style={styles.formRow}>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Bank Name</label><input style={styles.input} placeholder="e.g. SBI, PNB, BOI" value={chequeForm.bank_name} onChange={e => setChequeForm({ ...chequeForm, bank_name: e.target.value })} /></div>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Amount (₹) *</label><input style={styles.input} type="number" placeholder="0" value={chequeForm.amount} onChange={e => setChequeForm({ ...chequeForm, amount: e.target.value })} /></div>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Received Date</label><input style={styles.input} type="date" value={chequeForm.received_date} onChange={e => setChequeForm({ ...chequeForm, received_date: e.target.value })} /></div>
-                </div>
-                <div style={styles.formRow}>
-                  <div style={{ flex: 2 }}><label style={styles.label}>Notes</label><input style={styles.input} placeholder="e.g. Against order #5" value={chequeForm.notes} onChange={e => setChequeForm({ ...chequeForm, notes: e.target.value })} /></div>
-                </div>
-                <LoadingButton loading={chequeSaving} style={styles.submitBtn} type="submit">Save Cheque</LoadingButton>
-              </form>
+              ))}
             </div>
-          )}
-          <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-            <div style={{ flex: '1', minWidth: '300px' }}>
-              {cheques.length === 0 ? <p style={{ color: '#888' }}>No cheques for this period.</p> : (
-                <div style={styles.tableScroll}>
-                <table style={styles.table}>
-                  <thead><tr><th style={styles.th}>Date</th><th style={styles.th}>Cheque No.</th><th style={styles.th}>Firm</th><th style={styles.th}>Amount</th><th style={styles.th}>Status</th></tr></thead>
-                  <tbody>
-                    {cheques.map(c => (
-                      <tr key={c.id} style={{ ...styles.tr, cursor: 'pointer', backgroundColor: selectedCheque?.id === c.id ? '#f0f7ff' : '#fff', borderLeft: selectedCheque?.id === c.id ? '3px solid #1a1a2e' : '3px solid transparent' }}
-                        onClick={() => { setSelectedCheque(c); getCheque(c.id).then(r => { setChequeDetail(r.data); setChequeEditForm({ cheque_number: r.data.cheque_number || '', bank_name: r.data.bank_name || '', notes: r.data.notes || '', received_date: r.data.received_date || '' }) }) }}
-                        onMouseEnter={e => { if (selectedCheque?.id !== c.id) e.currentTarget.style.backgroundColor = '#f9f9f9' }}
-                        onMouseLeave={e => { if (selectedCheque?.id !== c.id) e.currentTarget.style.backgroundColor = '#fff' }}
-                      >
-                        <td style={styles.td}>{c.received_date}</td>
-                        <td style={styles.td}><strong>{c.cheque_number || '—'}</strong></td>
-                        <td style={styles.td}>{c.firm_name}</td>
-                        <td style={styles.td}><strong>₹{c.amount}</strong></td>
-                        <td style={styles.td}><span style={{ ...styles.badge, backgroundColor: statusColor(c.status) }}>{c.status}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                </div>
-              )}
+
+            <div className="flex justify-end">
+              <PrimaryButton icon={showChequeForm ? X : Plus} onClick={() => setShowChequeForm(!showChequeForm)}>
+                {showChequeForm ? 'Cancel' : 'Add Cheque'}
+              </PrimaryButton>
             </div>
-            {chequeDetail && (
-              <div style={{ flex: '1', minWidth: '280px' }}>
-                <div style={styles.formBox}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
-                    <h3>Cheque Details</h3>
-                    <button onClick={() => setEditingCheque(!editingCheque)} style={{ backgroundColor: '#fff', color: '#1a1a2e', border: '1px solid #1a1a2e', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>{editingCheque ? 'Cancel Edit' : <><Pencil size={12} /> Edit</>}</button>
+
+            {showChequeForm && (
+              <Card>
+                <h3 className="text-white font-bold mb-4">Record New Cheque</h3>
+                <form onSubmit={handleAddCheque} className="space-y-3">
+                  <div className="flex gap-3 flex-wrap">
+                    <div className="flex-1 min-w-[150px]"><label className={labelClasses}>Cheque Number</label><input className={inputClasses} placeholder="e.g. 123456" value={chequeForm.cheque_number} onChange={e => setChequeForm({ ...chequeForm, cheque_number: e.target.value })} /></div>
+                    <div className="flex-1 min-w-[150px]"><label className={labelClasses}>Firm / Person Name *</label><input className={inputClasses} placeholder="Who gave the cheque" value={chequeForm.firm_name} onChange={e => setChequeForm({ ...chequeForm, firm_name: e.target.value })} /></div>
+                    <div className="flex-1 min-w-[150px]">
+                      <label className={labelClasses}>Link to Customer (optional)</label>
+                      <select className={inputClasses} value={chequeForm.customer_id} onChange={e => setChequeForm({ ...chequeForm, customer_id: e.target.value })}>
+                        <option value="">Select Customer</option>
+                        {customers.map(c => <option key={c.id} value={c.id}>{c.firm_name}</option>)}
+                      </select>
+                    </div>
                   </div>
+                  <div className="flex gap-3 flex-wrap">
+                    <div className="flex-1 min-w-[150px]"><label className={labelClasses}>Bank Name</label><input className={inputClasses} placeholder="e.g. SBI, PNB, BOI" value={chequeForm.bank_name} onChange={e => setChequeForm({ ...chequeForm, bank_name: e.target.value })} /></div>
+                    <div className="flex-1 min-w-[150px]"><label className={labelClasses}>Amount (₹) *</label><input className={inputClasses} type="number" placeholder="0" value={chequeForm.amount} onChange={e => setChequeForm({ ...chequeForm, amount: e.target.value })} /></div>
+                    <div className="flex-1 min-w-[150px]"><label className={labelClasses}>Received Date</label><input className={inputClasses} type="date" value={chequeForm.received_date} onChange={e => setChequeForm({ ...chequeForm, received_date: e.target.value })} /></div>
+                  </div>
+                  <div><label className={labelClasses}>Notes</label><input className={inputClasses} placeholder="e.g. Against order #5" value={chequeForm.notes} onChange={e => setChequeForm({ ...chequeForm, notes: e.target.value })} /></div>
+                  <LoadingButton loading={chequeSaving} type="submit" className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25">Save Cheque</LoadingButton>
+                </form>
+              </Card>
+            )}
+
+            <div className="flex gap-5 flex-wrap items-start">
+              <div className="flex-1 min-w-[300px]">
+                {cheques.length === 0 ? <p className="text-slate-500 text-sm">No cheques for this period.</p> : (
+                  <Card padded={false} className="overflow-hidden">
+                    <Table minWidth="500px">
+                      <THead>
+                        <Th className="pl-4">Date</Th><Th>Cheque No.</Th><Th>Firm</Th><Th>Amount</Th><Th className="pr-4">Status</Th>
+                      </THead>
+                      <TBody>
+                        {cheques.map(c => (
+                          <Tr
+                            key={c.id}
+                            onClick={() => { setSelectedCheque(c); getCheque(c.id).then(r => { setChequeDetail(r.data); setChequeEditForm({ cheque_number: r.data.cheque_number || '', bank_name: r.data.bank_name || '', notes: r.data.notes || '', received_date: r.data.received_date || '' }) }) }}
+                            className={selectedCheque?.id === c.id ? '!bg-blue-500/10 border-l-2 border-l-blue-500' : ''}
+                          >
+                            <Td className="pl-4 text-slate-300">{c.received_date}</Td>
+                            <Td className="font-bold text-white">{c.cheque_number || '—'}</Td>
+                            <Td className="text-slate-300">{c.firm_name}</Td>
+                            <Td className="font-bold text-white font-mono">₹{c.amount}</Td>
+                            <Td className="pr-4"><Badge tone={CHEQUE_STATUS_TONE[c.status] || 'slate'}>{c.status}</Badge></Td>
+                          </Tr>
+                        ))}
+                      </TBody>
+                    </Table>
+                  </Card>
+                )}
+              </div>
+
+              {chequeDetail && (
+                <Card className="flex-1 min-w-[280px]">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-white font-bold">Cheque Details</h3>
+                    <SecondaryButton icon={editingCheque ? undefined : Pencil} onClick={() => setEditingCheque(!editingCheque)}>
+                      {editingCheque ? 'Cancel Edit' : 'Edit'}
+                    </SecondaryButton>
+                  </div>
+
                   {!editingCheque ? (
                     <div>
-                      {[['Cheque Number', chequeDetail.cheque_number || '—'],['Firm / Person', chequeDetail.firm_name],['Bank', chequeDetail.bank_name || '—'],['Amount', `₹${chequeDetail.amount}`],['Received Date', chequeDetail.received_date],['Notes', chequeDetail.notes || '—']].map(([l,v]) => (
-                        <div key={l} style={styles.detailRow}><span style={styles.detailLabel}>{l}</span><span style={styles.detailValue}>{v}</span></div>
+                      {[['Cheque Number', chequeDetail.cheque_number || '—'], ['Firm / Person', chequeDetail.firm_name], ['Bank', chequeDetail.bank_name || '—'], ['Amount', `₹${chequeDetail.amount}`], ['Received Date', chequeDetail.received_date], ['Notes', chequeDetail.notes || '—']].map(([l, v]) => (
+                        <div key={l} className="flex justify-between py-2.5 border-b border-slate-800/60">
+                          <span className="text-xs font-bold text-slate-400">{l}</span>
+                          <span className="text-sm text-slate-200 text-right">{v}</span>
+                        </div>
                       ))}
                       {chequeDetail.customer_firm && chequeDetail.customer_firm !== chequeDetail.firm_name && (
-                        <div style={styles.detailRow}><span style={styles.detailLabel}>Linked Customer</span><span style={styles.detailValue}>{chequeDetail.customer_firm}</span></div>
+                        <div className="flex justify-between py-2.5 border-b border-slate-800/60">
+                          <span className="text-xs font-bold text-slate-400">Linked Customer</span>
+                          <span className="text-sm text-slate-200">{chequeDetail.customer_firm}</span>
+                        </div>
                       )}
-                      <div style={{ marginTop: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <span style={{ fontSize: '13px', color: '#888', fontWeight: 'bold' }}>Current Status:</span>
-                        <span style={{ ...styles.badge, backgroundColor: statusColor(chequeDetail.status), fontSize: '13px', padding: '5px 14px' }}>{chequeDetail.status}</span>
+
+                      <div className="mt-5 mb-4 flex items-center gap-3">
+                        <span className="text-xs font-bold text-slate-400">Current Status:</span>
+                        <Badge tone={CHEQUE_STATUS_TONE[chequeDetail.status] || 'slate'} className="!text-xs !px-3.5 !py-1">{chequeDetail.status}</Badge>
                       </div>
-                      <div style={{ fontSize: '13px', color: '#555', marginBottom: '10px', fontWeight: 'bold' }}>Update Status:</div>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {['received','deposited','cleared','bounced'].map(s => (
-                          <button key={s} onClick={() => { handleChequeStatusUpdate(chequeDetail.id, s); setChequeDetail({ ...chequeDetail, status: s }); setCheques(cheques.map(c => c.id === chequeDetail.id ? { ...c, status: s } : c)) }}
-                            style={{ padding: '8px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: chequeDetail.status === s ? 'bold' : 'normal', backgroundColor: chequeDetail.status === s ? statusColor(s) : '#fff', color: chequeDetail.status === s ? '#fff' : '#555', border: `1px solid ${statusColor(s)}` }}>
-                            {s === 'received' ? <><Inbox size={12} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Received</>
-                              : s === 'deposited' ? <><Building2 size={12} style={{ marginRight: '4px', verticalAlign: 'middle' }} />In Bank</>
-                              : s === 'cleared' ? <><CheckCircle2 size={12} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Cleared</>
-                              : <><XCircle size={12} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Bounced</>}
-                          </button>
-                        ))}
+                      <div className="text-xs font-bold text-slate-300 mb-2.5">Update Status:</div>
+                      <div className="flex gap-2 flex-wrap">
+                        {['received','deposited','cleared','bounced'].map(s => {
+                          const active = chequeDetail.status === s
+                          const tone = CHEQUE_STATUS_TONE[s]
+                          return (
+                            <button
+                              key={s}
+                              onClick={() => { handleChequeStatusUpdate(chequeDetail.id, s); setChequeDetail({ ...chequeDetail, status: s }); setCheques(cheques.map(c => c.id === chequeDetail.id ? { ...c, status: s } : c)) }}
+                              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all ${
+                                active
+                                  ? tone === 'amber' ? 'bg-amber-600 border-amber-500 text-white'
+                                    : tone === 'blue' ? 'bg-blue-600 border-blue-500 text-white'
+                                    : tone === 'emerald' ? 'bg-emerald-600 border-emerald-500 text-white'
+                                    : 'bg-red-600 border-red-500 text-white'
+                                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+                              }`}
+                            >
+                              {s === 'received' ? <><Inbox className="w-3 h-3 inline mr-1" /> Received</>
+                                : s === 'deposited' ? <><Building2 className="w-3 h-3 inline mr-1" /> In Bank</>
+                                : s === 'cleared' ? <><CheckCircle2 className="w-3 h-3 inline mr-1" /> Cleared</>
+                                : <><XCircle className="w-3 h-3 inline mr-1" /> Bounced</>}
+                            </button>
+                          )
+                        })}
                       </div>
-                      <div style={{ marginTop: '12px', padding: '10px', backgroundColor: '#f8f8f8', borderRadius: '6px', fontSize: '12px', color: '#666' }}>
-                        {chequeDetail.status === 'received' && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Inbox size={12} /> Cheque is with you, not yet deposited.</span>}
-                        {chequeDetail.status === 'deposited' && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Building2 size={12} /> Deposited in bank, waiting to clear.</span>}
-                        {chequeDetail.status === 'cleared' && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><CheckCircle2 size={12} /> Payment received. Counted in customer dues.</span>}
-                        {chequeDetail.status === 'bounced' && <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><XCircle size={12} /> Cheque bounced. Follow up with customer.</span>}
+                      <div className="mt-3 p-2.5 bg-slate-800/40 rounded-xl text-xs text-slate-400">
+                        {chequeDetail.status === 'received' && <span className="flex items-center gap-1.5"><Inbox className="w-3 h-3" /> Cheque is with you, not yet deposited.</span>}
+                        {chequeDetail.status === 'deposited' && <span className="flex items-center gap-1.5"><Building2 className="w-3 h-3" /> Deposited in bank, waiting to clear.</span>}
+                        {chequeDetail.status === 'cleared' && <span className="flex items-center gap-1.5"><CheckCircle2 className="w-3 h-3" /> Payment received. Counted in customer dues.</span>}
+                        {chequeDetail.status === 'bounced' && <span className="flex items-center gap-1.5"><XCircle className="w-3 h-3" /> Cheque bounced. Follow up with customer.</span>}
                       </div>
                     </div>
                   ) : (
@@ -669,504 +702,432 @@ function Accounts() {
                         .then(() => { notify('Cheque updated.'); setEditingCheque(false); getCheque(chequeDetail.id).then(r => setChequeDetail(r.data)); fetchCheques() })
                         .catch(() => notify('Error updating cheque.'))
                         .finally(() => setChequeEditSaving(false))
-                    }}>
-                      {[['Cheque Number','cheque_number'],['Bank Name','bank_name'],['Notes','notes']].map(([l,k]) => (
-                        <div key={k} style={{ marginBottom: '12px' }}><label style={styles.label}>{l}</label><input style={styles.input} value={chequeEditForm[k]} onChange={e => setChequeEditForm({ ...chequeEditForm, [k]: e.target.value })} /></div>
+                    }} className="space-y-3">
+                      {[['Cheque Number', 'cheque_number'], ['Bank Name', 'bank_name'], ['Notes', 'notes']].map(([l, k]) => (
+                        <div key={k}><label className={labelClasses}>{l}</label><input className={inputClasses} value={chequeEditForm[k]} onChange={e => setChequeEditForm({ ...chequeEditForm, [k]: e.target.value })} /></div>
                       ))}
-                      <div style={{ marginBottom: '16px' }}><label style={styles.label}>Received Date</label><input style={styles.input} type="date" value={chequeEditForm.received_date} onChange={e => setChequeEditForm({ ...chequeEditForm, received_date: e.target.value })} /></div>
-                      <LoadingButton loading={chequeEditSaving} style={styles.submitBtn} type="submit">Save Changes</LoadingButton>
+                      <div><label className={labelClasses}>Received Date</label><input className={inputClasses} type="date" value={chequeEditForm.received_date} onChange={e => setChequeEditForm({ ...chequeEditForm, received_date: e.target.value })} /></div>
+                      <LoadingButton loading={chequeEditSaving} type="submit" className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25">Save Changes</LoadingButton>
                     </form>
                   )}
-                </div>
-              </div>
+                </Card>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════ UPI TAB ══════════════════ */}
+        {activeTab === 'upi' && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {UPI_ACCOUNTS.map((acc, i) => {
+                const s = upiSummary.find(x => x.upi_account === acc)
+                const active = upiFilter === acc
+                return (
+                  <button
+                    key={acc}
+                    onClick={() => { setUpiFilter(active ? '' : acc); fetchUpi() }}
+                    className={`text-left bg-slate-900 border-t-4 border border-slate-800 rounded-2xl p-4 transition-all ${active ? 'ring-2 ring-blue-500' : ''}`}
+                    style={{ borderTopColor: undefined }}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`w-2.5 h-2.5 rounded-full ${UPI_ACCOUNT_TONE[i]}`} />
+                      <div className="text-lg font-bold text-white font-mono">₹{s ? s.total : 0}</div>
+                    </div>
+                    <div className="text-xs text-slate-300">{acc}</div>
+                    <div className="text-[11px] text-slate-500">{s ? s.count : 0} transactions</div>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="flex justify-end">
+              <PrimaryButton icon={showUpiForm ? X : Plus} onClick={() => setShowUpiForm(!showUpiForm)}>
+                {showUpiForm ? 'Cancel' : 'Record UPI Payment'}
+              </PrimaryButton>
+            </div>
+
+            {showUpiForm && (
+              <Card>
+                <h3 className="text-white font-bold mb-4">Record UPI Transaction</h3>
+                <form onSubmit={handleAddUpi} className="space-y-3">
+                  <div className="flex gap-3 flex-wrap">
+                    <div className="flex-1 min-w-[150px]">
+                      <label className={labelClasses}>UPI Account Received In *</label>
+                      <select className={inputClasses} value={upiForm.upi_account} onChange={e => setUpiForm({ ...upiForm, upi_account: e.target.value })}>
+                        <option value="">Select UPI Account</option>
+                        {UPI_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[150px]"><label className={labelClasses}>Amount (₹) *</label><input className={inputClasses} type="number" placeholder="0" value={upiForm.amount} onChange={e => setUpiForm({ ...upiForm, amount: e.target.value })} /></div>
+                    <div className="flex-1 min-w-[150px]"><label className={labelClasses}>Date</label><input className={inputClasses} type="date" value={upiForm.transaction_date} onChange={e => setUpiForm({ ...upiForm, transaction_date: e.target.value })} /></div>
+                  </div>
+                  <div className="flex gap-3 flex-wrap">
+                    <div className="flex-1 min-w-[150px]"><label className={labelClasses}>Customer Name</label><input className={inputClasses} placeholder="Who paid" value={upiForm.customer_name} onChange={e => setUpiForm({ ...upiForm, customer_name: e.target.value })} /></div>
+                    <div className="flex-1 min-w-[150px]">
+                      <label className={labelClasses}>Link to Customer (optional)</label>
+                      <select className={inputClasses} value={upiForm.customer_id} onChange={e => setUpiForm({ ...upiForm, customer_id: e.target.value })}>
+                        <option value="">Select Customer</option>
+                        {customers.map(c => <option key={c.id} value={c.id}>{c.firm_name}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[150px]"><label className={labelClasses}>UTR / Reference Number</label><input className={inputClasses} placeholder="e.g. 123456789012" value={upiForm.utr_number} onChange={e => setUpiForm({ ...upiForm, utr_number: e.target.value })} /></div>
+                  </div>
+                  <div><label className={labelClasses}>Notes</label><input className={inputClasses} placeholder="e.g. Payment for flex order" value={upiForm.notes} onChange={e => setUpiForm({ ...upiForm, notes: e.target.value })} /></div>
+                  <LoadingButton loading={upiSaving} type="submit" className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25">Save UPI Transaction</LoadingButton>
+                </form>
+              </Card>
+            )}
+
+            {upiTransactions.length === 0 ? <p className="text-slate-500 text-sm">No UPI transactions for this period.</p> : (
+              <Card padded={false} className="overflow-hidden">
+                <Table minWidth="800px">
+                  <THead>
+                    <Th className="pl-4">Date</Th><Th>UPI Account</Th><Th>From</Th><Th>Amount</Th>
+                    <Th>UTR No.</Th><Th>Notes</Th><Th>Type</Th><Th className="pr-4">Action</Th>
+                  </THead>
+                  <TBody>
+                    {upiTransactions.map(t => {
+                      const aIdx = UPI_ACCOUNTS.indexOf(t.upi_account)
+                      return (
+                        <Tr key={`${t.direction}-${t.id}`}>
+                          <Td className="pl-4 text-slate-300">{t.transaction_date}</Td>
+                          <Td>
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                              <span className={`w-2 h-2 rounded-full ${UPI_ACCOUNT_TONE[aIdx] || 'bg-slate-500'}`} />
+                              {t.upi_account}
+                            </span>
+                          </Td>
+                          <Td className="text-slate-300">{t.customer_name || '—'}</Td>
+                          <Td><strong className={`font-mono ${t.direction === 'debit' ? 'text-red-400' : 'text-emerald-400'}`}>{t.direction === 'debit' ? '-' : '+'}₹{Math.abs(t.amount)}</strong></Td>
+                          <Td className="text-xs text-slate-500">{t.utr_number || '—'}</Td>
+                          <Td className="text-xs text-slate-500">{t.notes || '—'}</Td>
+                          <Td><Badge tone={t.direction === 'debit' ? 'red' : 'emerald'}>{t.direction === 'debit' ? '↑ Paid Out' : '↓ Received'}</Badge></Td>
+                          <Td className="pr-4">
+                            {t.direction === 'credit' && (
+                              <IconButton
+                                icon={Trash2}
+                                onClick={() => setUpiDeleteModal({
+                                  type: t.source === 'cash_income' ? 'cash_income' : 'upi_income',
+                                  id: t.id,
+                                  label: `${t.customer_name || 'Unknown'} — ₹${t.amount} (${t.upi_account})`
+                                })}
+                                className="!p-1.5 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20"
+                              />
+                            )}
+                          </Td>
+                        </Tr>
+                      )
+                    })}
+                  </TBody>
+                </Table>
+              </Card>
             )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ─── UPI TAB ─── */}
-      {activeTab === 'upi' && (
-        <div>
-          <div style={styles.summaryRow}>
-            {UPI_ACCOUNTS.map(acc => {
-              const s = upiSummary.find(x => x.upi_account === acc)
-              return (
-                <div key={acc} style={{ ...styles.summaryCard, borderTop: `4px solid ${upiColor(acc)}`, cursor: 'pointer', outline: upiFilter === acc ? `2px solid ${upiColor(acc)}` : 'none' }}
-                  onClick={() => { setUpiFilter(upiFilter === acc ? '' : acc); fetchUpi() }}>
-                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: upiColor(acc) }}>₹{s ? s.total : 0}</div>
-                  <div style={{ fontSize: '11px', color: '#555', marginTop: '4px' }}>{acc}</div>
-                  <div style={{ fontSize: '11px', color: '#aaa' }}>{s ? s.count : 0} transactions</div>
-                </div>
-              )
-            })}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-            <button style={styles.addBtn} onClick={() => setShowUpiForm(!showUpiForm)}>{showUpiForm ? 'Cancel' : '+ Record UPI Payment'}</button>
-          </div>
-          {showUpiForm && (
-            <div style={styles.formBox}>
-              <h3 style={{ marginBottom: '16px' }}>Record UPI Transaction</h3>
-              <form onSubmit={handleAddUpi}>
-                <div style={styles.formRow}>
-                  <div style={{ flex: 1 }}><label style={styles.label}>UPI Account Received In *</label><select style={styles.input} value={upiForm.upi_account} onChange={e => setUpiForm({ ...upiForm, upi_account: e.target.value })}><option value="">Select UPI Account</option>{UPI_ACCOUNTS.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Amount (₹) *</label><input style={styles.input} type="number" placeholder="0" value={upiForm.amount} onChange={e => setUpiForm({ ...upiForm, amount: e.target.value })} /></div>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Date</label><input style={styles.input} type="date" value={upiForm.transaction_date} onChange={e => setUpiForm({ ...upiForm, transaction_date: e.target.value })} /></div>
-                </div>
-                <div style={styles.formRow}>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Customer Name</label><input style={styles.input} placeholder="Who paid" value={upiForm.customer_name} onChange={e => setUpiForm({ ...upiForm, customer_name: e.target.value })} /></div>
-                  <div style={{ flex: 1 }}><label style={styles.label}>Link to Customer (optional)</label><select style={styles.input} value={upiForm.customer_id} onChange={e => setUpiForm({ ...upiForm, customer_id: e.target.value })}><option value="">Select Customer</option>{customers.map(c => <option key={c.id} value={c.id}>{c.firm_name}</option>)}</select></div>
-                  <div style={{ flex: 1 }}><label style={styles.label}>UTR / Reference Number</label><input style={styles.input} placeholder="e.g. 123456789012" value={upiForm.utr_number} onChange={e => setUpiForm({ ...upiForm, utr_number: e.target.value })} /></div>
-                </div>
-                <div style={styles.formRow}><div style={{ flex: 2 }}><label style={styles.label}>Notes</label><input style={styles.input} placeholder="e.g. Payment for flex order" value={upiForm.notes} onChange={e => setUpiForm({ ...upiForm, notes: e.target.value })} /></div></div>
-                <LoadingButton loading={upiSaving} style={styles.submitBtn} type="submit">Save UPI Transaction</LoadingButton>
-              </form>
-            </div>
-          )}
-          {upiTransactions.length === 0 ? <p style={{ color: '#888' }}>No UPI transactions for this period.</p> : (
-            <div style={styles.tableScroll}>
-            <table style={styles.table}>
-              <thead><tr><th style={styles.th}>Date</th><th style={styles.th}>UPI Account</th><th style={styles.th}>From</th><th style={styles.th}>Amount</th><th style={styles.th}>UTR No.</th><th style={styles.th}>Notes</th><th style={styles.th}>Type</th><th style={styles.th}>Action</th></tr></thead>
-              <tbody>
-                {upiTransactions.map(t => (
-                  <tr key={`${t.direction}-${t.id}`} style={styles.tr} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'} onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}>
-                    <td style={styles.td}>{t.transaction_date}</td>
-                    <td style={styles.td}><span style={{ ...styles.badge, backgroundColor: upiColor(t.upi_account), fontSize: '11px' }}>{t.upi_account}</span></td>
-                    <td style={styles.td}>{t.customer_name || '—'}</td>
-                    <td style={styles.td}><strong style={{ color: t.direction === 'debit' ? '#e74c3c' : '#27ae60' }}>{t.direction === 'debit' ? '-' : '+'}₹{Math.abs(t.amount)}</strong></td>
-                    <td style={styles.td}><span style={{ fontSize: '12px', color: '#888' }}>{t.utr_number || '—'}</span></td>
-                    <td style={styles.td}><span style={{ fontSize: '12px', color: '#888' }}>{t.notes || '—'}</span></td>
-                    <td style={styles.td}><span style={{ ...styles.badge, backgroundColor: t.direction === 'debit' ? '#e74c3c' : '#27ae60' }}>{t.direction === 'debit' ? '↑ Paid Out' : '↓ Received'}</span></td>
-                    <td style={styles.td}>
-                      {t.direction === 'credit' && (
-                        <button
-                          onClick={() => setUpiDeleteModal({
-                            type: t.source === 'cash_income' ? 'cash_income' : 'upi_income',
-                            id: t.id,
-                            label: `${t.customer_name || 'Unknown'} — ₹${t.amount} (${t.upi_account})`
-                          })}
-                          style={{
-                            backgroundColor: '#800000', color: '#fff', border: '1px solid #800000',
-                            borderRadius: '4px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer'
-                          }}
-                          title="Delete this entry"
-                        ><Trash2 size={12} /></button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ─── VENDORS TAB ─── */}
-      {activeTab === 'vendors' && (
-        <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-
-          {/* LEFT: vendor list */}
-          <div style={{ flex: '1', minWidth: '280px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h3 style={{ margin: 0 }}>Vendors <span style={{ color: '#aaa', fontWeight: 400, fontSize: '14px' }}>({vendors.length})</span></h3>
-              <button style={styles.addBtn} onClick={() => setShowAddVendor(true)}>+ Add Vendor</button>
-            </div>
-
-            {vendors.map(v => (
-              <div key={v.id}
-                style={{ ...styles.vendorCard, border: selectedVendor?.id === v.id ? '2px solid #1a1a2e' : '1px solid #eee' }}
-                onClick={() => fetchVendorDetail(v.id)}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontWeight: 'bold', marginBottom: '2px' }}>{v.name}</div>
-                    <div style={{ fontSize: '12px', color: '#888' }}>{v.shop_type} • {v.city}</div>
-                  </div>
-                  {/* Edit / Delete buttons */}
-                  <div style={{ display: 'flex', gap: '4px' }} onClick={e => e.stopPropagation()}>
-                    <button onClick={() => setEditVendorData(v)} title="Edit vendor" style={{
-                      background: '#fff', border: '1px solid #1a1a2e', color: '#1a1a2e',
-                      borderRadius: '6px', padding: '4px 9px', fontSize: '12px', cursor: 'pointer', fontWeight: 700,
-                      display: 'inline-flex', alignItems: 'center'
-                    }}><Pencil size={12} /></button>
-                    <button onClick={() => setDeleteConfirmV(v)} title="Delete vendor" style={{
-                      background: '#800000', border: '1px solid #800000', color: '#fff',
-                      borderRadius: '6px', padding: '4px 9px', fontSize: '12px', cursor: 'pointer', fontWeight: 700,
-                      display: 'inline-flex', alignItems: 'center'
-                    }}><Trash2 size={12} /></button>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
-                  <span style={{ fontSize: '12px', color: '#27ae60' }}>Purchased: ₹{v.total_purchased}</span>
-                  <span style={{ fontSize: '12px', color: '#e74c3c', fontWeight: 'bold' }}>Due: ₹{v.balance_due}</span>
-                </div>
+        {/* ══════════════════ VENDORS TAB ══════════════════ */}
+        {activeTab === 'vendors' && (
+          <div className="flex gap-5 flex-wrap items-start">
+            <div className="flex-1 min-w-[280px]">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-white font-bold">Vendors <span className="text-slate-500 font-normal text-sm">({vendors.length})</span></h3>
+                <PrimaryButton icon={Plus} onClick={() => setShowAddVendor(true)}>Add Vendor</PrimaryButton>
               </div>
-            ))}
-          </div>
 
-          {/* RIGHT: vendor detail */}
-          {vendorDetail && (
-            <div style={{ flex: '2', minWidth: '300px' }}>
-              <div style={styles.formBox}>
-                <h3 style={{ marginBottom: '4px' }}>{vendorDetail.name}</h3>
-                <p style={{ fontSize: '13px', color: '#888', marginBottom: '16px' }}>
-                  {vendorDetail.shop_type} • {vendorDetail.city}{vendorDetail.phone ? ` • ${vendorDetail.phone}` : ''}
-                </p>
+              <div className="space-y-2.5">
+                {vendors.map(v => (
+                  <Card
+                    key={v.id}
+                    onClick={() => fetchVendorDetail(v.id)}
+                    className={`!p-3.5 cursor-pointer transition-all ${selectedVendor?.id === v.id ? '!border-blue-500' : 'hover:!border-slate-700'}`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="font-bold text-white text-sm">{v.name}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">{v.shop_type} • {v.city}</div>
+                      </div>
+                      <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
+                        <IconButton icon={Pencil} onClick={() => setEditVendorData(v)} className="!p-1.5 bg-slate-800/60" />
+                        <IconButton icon={Trash2} onClick={() => setDeleteConfirmV(v)} className="!p-1.5 bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20" />
+                      </div>
+                    </div>
+                    <div className="flex justify-between mt-2.5 text-xs">
+                      <span className="text-emerald-400">Purchased: ₹{v.total_purchased}</span>
+                      <span className="text-red-400 font-bold">Due: ₹{v.balance_due}</span>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
 
-                {/* Stats */}
-                <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+            {vendorDetail && (
+              <Card className="flex-[2] min-w-[300px]">
+                <h3 className="text-white font-bold mb-1">{vendorDetail.name}</h3>
+                <p className="text-xs text-slate-500 mb-4">{vendorDetail.shop_type} • {vendorDetail.city}{vendorDetail.phone ? ` • ${vendorDetail.phone}` : ''}</p>
+
+                <div className="flex gap-3 flex-wrap mb-5">
                   {[
-                    { label: 'Total Purchased', val: vendorDetail.total_purchased, color: '#e74c3c' },
-                    { label: 'Total Paid',       val: vendorDetail.total_paid,      color: '#27ae60' },
-                    { label: 'Balance Due',      val: vendorDetail.balance_due,     color: vendorDetail.balance_due > 0 ? '#e74c3c' : '#27ae60', bg: vendorDetail.balance_due > 0 ? '#fff5f5' : '#f0fff4' }
+                    { label: 'Total Purchased', val: vendorDetail.total_purchased, color: 'text-red-400' },
+                    { label: 'Total Paid', val: vendorDetail.total_paid, color: 'text-emerald-400' },
+                    { label: 'Balance Due', val: vendorDetail.balance_due, color: vendorDetail.balance_due > 0 ? 'text-red-400' : 'text-emerald-400', bg: vendorDetail.balance_due > 0 ? 'bg-red-500/10' : 'bg-emerald-500/10' },
                   ].map(({ label, val, color, bg }) => (
-                    <div key={label} style={{ ...styles.vendorStat, ...(bg ? { backgroundColor: bg } : {}) }}>
-                      <div style={{ fontSize: '18px', fontWeight: 'bold', color }}>₹{val}</div>
-                      <div style={{ fontSize: '11px', color: '#888' }}>{label}</div>
+                    <div key={label} className={`flex-1 min-w-[100px] rounded-xl p-3 text-center ${bg || 'bg-slate-800/40'}`}>
+                      <div className={`text-lg font-bold font-mono ${color}`}>₹{val}</div>
+                      <div className="text-[11px] text-slate-500">{label}</div>
                     </div>
                   ))}
                 </div>
 
-                {/* Transaction form */}
-                <div style={{ marginBottom: '20px', backgroundColor: '#f8f8f8', padding: '16px', borderRadius: '8px' }}>
-                  <h4 style={{ marginBottom: '12px' }}>Record Transaction</h4>
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+                <div className="bg-slate-800/40 border border-slate-800 rounded-2xl p-4 mb-5">
+                  <h4 className="text-white font-bold mb-3 text-sm">Record Transaction</h4>
+                  <div className="flex gap-2 mb-3.5">
                     {[
-                      { key: 'purchase', label: <><Package size={13} style={{ marginRight: '5px', verticalAlign: 'middle' }} />Purchase (We Bought)</>, color: '#e74c3c' },
-                      { key: 'payment',  label: <><Banknote size={13} style={{ marginRight: '5px', verticalAlign: 'middle' }} />Payment (We Paid)</>,     color: '#27ae60' }
-                    ].map(({ key, label, color }) => (
-                      <button key={key} type="button" onClick={() => { setTxnType(key); resetTxnForm() }} style={{ ...styles.txnTypeBtn, backgroundColor: txnType === key ? color : '#fff', color: txnType === key ? '#fff' : color, border: `1px solid ${color}` }}>{label}</button>
-                    ))}
+                      { key: 'purchase', label: 'Purchase (We Bought)', icon: Package, tone: 'red' },
+                      { key: 'payment', label: 'Payment (We Paid)', icon: Banknote, tone: 'emerald' },
+                    ].map(({ key, label, icon: Icon, tone }) => {
+                      const active = txnType === key
+                      return (
+                        <button
+                          key={key} type="button" onClick={() => { setTxnType(key); resetTxnForm() }}
+                          className={`px-3.5 py-2 rounded-xl text-xs font-bold border-2 flex items-center gap-1.5 transition-all ${
+                            active
+                              ? tone === 'red' ? 'bg-red-600 border-red-500 text-white' : 'bg-emerald-600 border-emerald-500 text-white'
+                              : tone === 'red' ? 'border-red-500/40 text-red-400 bg-transparent' : 'border-emerald-500/40 text-emerald-400 bg-transparent'
+                          }`}
+                        >
+                          <Icon className="w-3.5 h-3.5" /> {label}
+                        </button>
+                      )
+                    })}
                   </div>
 
-                  {/* ── Purchase form ── */}
                   {txnType === 'purchase' && (
                     <form onSubmit={handleVendorPurchase}>
                       <PurchaseItemsEditor items={purchaseItems} setItems={setPurchaseItems} />
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-                        <div style={{ flex: 1 }}>
-                          <label style={styles.label}>Date</label>
-                          <input style={styles.input} type="date" value={txnDate} onChange={e => setTxnDate(e.target.value)} />
-                        </div>
-                        <div style={{ flex: 2 }}>
-                          <label style={styles.label}>Note (optional)</label>
-                          <input style={styles.input} placeholder="Any additional note" value={txnDesc} onChange={e => setTxnDesc(e.target.value)} />
-                        </div>
+                      <div className="flex gap-2 flex-wrap mb-2">
+                        <div className="flex-1 min-w-[130px]"><label className={labelClasses}>Date</label><input className={inputClasses} type="date" value={txnDate} onChange={e => setTxnDate(e.target.value)} /></div>
+                        <div className="flex-[2] min-w-[200px]"><label className={labelClasses}>Note (optional)</label><input className={inputClasses} placeholder="Any additional note" value={txnDesc} onChange={e => setTxnDesc(e.target.value)} /></div>
                       </div>
-                      <LoadingButton loading={purchaseSaving} style={{ ...styles.submitBtn, backgroundColor: '#e74c3c' }} type="submit">Save Purchase</LoadingButton>
+                      <LoadingButton loading={purchaseSaving} type="submit" className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold">Save Purchase</LoadingButton>
                     </form>
                   )}
 
-                  {/* ── Payment form ── */}
                   {txnType === 'payment' && (
                     <form onSubmit={handleVendorPayment}>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-                        <div style={{ flex: 1 }}>
-                          <label style={styles.label}>Amount (₹) *</label>
+                      <div className="flex gap-2 flex-wrap mb-2">
+                        <div className="flex-1 min-w-[130px]">
+                          <label className={labelClasses}>Amount (₹) *</label>
                           <input
-                            style={{
-                              ...styles.input,
-                              ...(payMethod === 'cash' && noteTrackingEnabled
-                                ? { backgroundColor: '#f0f0f0', cursor: 'not-allowed' } : {})
-                            }}
+                            className={`${inputClasses} font-bold`}
                             type="number" placeholder="0"
                             value={payAmount}
                             onChange={e => setPayAmount(e.target.value)}
                             readOnly={payMethod === 'cash' && noteTrackingEnabled}
                           />
                           {payMethod === 'cash' && noteTrackingEnabled && (
-                            <div style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
-                              Note Counting (neeche) se bharo
-                            </div>
+                            <div className="text-[11px] text-slate-500 mt-1">Fill this from the Note Counting below</div>
                           )}
                         </div>
-                        <div style={{ flex: 1 }}>
-                          <label style={styles.label}>Date</label>
-                          <input style={styles.input} type="date" value={txnDate} onChange={e => setTxnDate(e.target.value)} />
-                        </div>
+                        <div className="flex-1 min-w-[130px]"><label className={labelClasses}>Date</label><input className={inputClasses} type="date" value={txnDate} onChange={e => setTxnDate(e.target.value)} /></div>
                       </div>
-                      <PaymentMethodSelector
-                        method={payMethod}   setMethod={setPayMethod}
-                        upiAccount={payUpiAcc}  setUpiAccount={setPayUpiAcc}
-                        bankType={payBankType}  setBankType={setPayBankType}
-                      />
+                      <PaymentMethodSelector method={payMethod} setMethod={setPayMethod} upiAccount={payUpiAcc} setUpiAccount={setPayUpiAcc} bankType={payBankType} setBankType={setPayBankType} />
                       {payMethod === 'cash' && noteTrackingEnabled && (
                         <DenominationCounter
                           context="expense"
                           availableNotes={availableNotes}
-                          onApply={(total, counts) => {
-                            setPayAmount(String(total))
-                            setPayDenomination(counts)
-                          }}
+                          onApply={(total, counts) => { setPayAmount(String(total)); setPayDenomination(counts) }}
                         />
                       )}
-                      <div style={{ marginBottom: '10px' }}>
-                        <label style={styles.label}>Description (optional)</label>
-                        <input style={styles.input} placeholder="e.g. Paid for last month's flex order" value={txnDesc} onChange={e => setTxnDesc(e.target.value)} />
-                      </div>
-                      <LoadingButton loading={paymentSaving} style={{ ...styles.submitBtn, backgroundColor: '#27ae60' }} type="submit">Save Payment</LoadingButton>
+                      <div className="mb-2.5"><label className={labelClasses}>Description (optional)</label><input className={inputClasses} placeholder="e.g. Paid for last month's flex order" value={txnDesc} onChange={e => setTxnDesc(e.target.value)} /></div>
+                      <LoadingButton loading={paymentSaving} type="submit" className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold">Save Payment</LoadingButton>
                     </form>
                   )}
                 </div>
 
-                {/* Transaction history */}
-                <h4 style={{ marginBottom: '10px' }}>Transaction History</h4>
+                <h4 className="text-white font-bold mb-2.5 text-sm">Transaction History</h4>
                 {(!vendorDetail.transactions || vendorDetail.transactions.length === 0) ? (
-                  <p style={{ color: '#888', fontSize: '14px' }}>No transactions yet.</p>
+                  <p className="text-slate-500 text-sm">No transactions yet.</p>
                 ) : (
-                  <div style={styles.tableScroll}>
-                  <table style={styles.table}>
-                    <thead>
-                      <tr>
-                        <th style={styles.th}>Date</th>
-                        <th style={styles.th}>Type</th>
-                        <th style={styles.th}>Amount</th>
-                        <th style={styles.th}>Details</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {vendorDetail.transactions.map(t => {
-                        const expandable = hasBreakdown(t)
-                        const isExpanded = expandedTxnId === t.id
-                        return (
-                        <Fragment key={t.id}>
-                          <tr
-                            style={{
-                              ...styles.tr,
-                              cursor: expandable ? 'pointer' : 'default',
-                              backgroundColor: isExpanded ? '#f8fdf9' : '#fff'
-                            }}
-                            onClick={() => expandable && setExpandedTxnId(isExpanded ? null : t.id)}
-                          >
-                            <td style={styles.td}>
-                              <div>{t.transaction_date}</div>
-                              {t.created_at && <div style={{ fontSize: '11px', color: '#aaa', display: 'flex', alignItems: 'center', gap: '3px' }}><Clock size={10} /> {fmtDT(t.created_at)}</div>}
-                            </td>
-                            <td style={styles.td}>
-                              <div>
-                                <span style={{ ...styles.badge, backgroundColor: t.type === 'purchase' ? '#e74c3c' : '#27ae60', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                  {t.type === 'purchase' ? <><Package size={11} /> Purchase</> : <><Banknote size={11} /> Payment</>}
-                                </span>
-                                {payMethodBadge(t)}
-                              </div>
-                            </td>
-                            <td style={styles.td}>
-                              <strong style={{ color: t.type === 'purchase' ? '#e74c3c' : '#27ae60' }}>₹{t.amount}</strong>
-                            </td>
-                            <td style={{ ...styles.td, fontSize: '13px', color: '#555' }}>
-                              {t.description && <div>{t.description}</div>}
-                              {/* Items chips */}
-                              {t.items && t.items.length > 0 && (
-                                <div style={{ marginTop: '4px' }}>
-                                  {t.items.map((it, i) => (
-                                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: '#f3f4f6', borderRadius: '5px', padding: '2px 7px', margin: '2px 3px 2px 0', fontSize: '12px' }}>
-                                      <span>{it.name}</span>
-                                      {it.qty && <span style={{ color: '#9ca3af' }}>×{it.qty}{it.unit}</span>}
-                                      {it.amount && <span style={{ fontWeight: 700 }}> ₹{it.amount}</span>}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-
-                          {isExpanded && (
-                            <tr style={{ backgroundColor: '#f8fdf9' }}>
-                              <td colSpan="4" style={{ padding: '4px 14px 14px 14px', borderBottom: '1px solid #f0f0f0' }}>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', paddingTop: '6px' }}>
-                                  <div>
-                                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#16a34a', marginBottom: '5px' }}>+ Aaye</div>
-                                    {renderDenomChips(t.denomination_breakdown.received, '#16a34a')
-                                      || <span style={{ fontSize: '12px', color: '#aaa' }}>—</span>}
-                                  </div>
-                                  {sumDenom(t.denomination_breakdown.returned) > 0 && (
-                                    <div>
-                                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#e74c3c', marginBottom: '5px' }}>− Gaye</div>
-                                      {renderDenomChips(t.denomination_breakdown.returned, '#e74c3c')}
+                  <Card padded={false} className="overflow-hidden">
+                    <Table minWidth="600px">
+                      <THead>
+                        <Th className="pl-4">Date</Th><Th>Type</Th><Th>Amount</Th><Th className="pr-4">Details</Th>
+                      </THead>
+                      <TBody>
+                        {vendorDetail.transactions.map(t => {
+                          const expandable = hasBreakdown(t)
+                          const isExpanded = expandedTxnId === t.id
+                          return (
+                            <Fragment key={t.id}>
+                              <Tr onClick={() => expandable && setExpandedTxnId(isExpanded ? null : t.id)} className={isExpanded ? '!bg-emerald-500/5' : ''}>
+                                <Td className="pl-4">
+                                  <div className="text-slate-300">{t.transaction_date}</div>
+                                  {t.created_at && <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5"><Clock className="w-2.5 h-2.5" /> {fmtDT(t.created_at)}</div>}
+                                </Td>
+                                <Td>
+                                  <Badge tone={t.type === 'purchase' ? 'red' : 'emerald'} icon={t.type === 'purchase' ? Package : Banknote}>
+                                    {t.type === 'purchase' ? 'Purchase' : 'Payment'}
+                                  </Badge>
+                                  {payMethodBadge(t)}
+                                </Td>
+                                <Td><strong className={`font-mono ${t.type === 'purchase' ? 'text-red-400' : 'text-emerald-400'}`}>₹{t.amount}</strong></Td>
+                                <Td className="pr-4 text-xs text-slate-400">
+                                  {t.description && <div>{t.description}</div>}
+                                  {t.items && t.items.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                      {t.items.map((it, i) => (
+                                        <span key={i} className="inline-flex items-center gap-1 bg-slate-800 rounded-md px-2 py-0.5 text-xs">
+                                          <span>{it.name}</span>
+                                          {it.qty && <span className="text-slate-500">×{it.qty}{it.unit}</span>}
+                                          {it.amount && <span className="font-bold">₹{it.amount}</span>}
+                                        </span>
+                                      ))}
                                     </div>
                                   )}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                  </div>
+                                </Td>
+                              </Tr>
+                              {isExpanded && (
+                                <tr className="bg-emerald-500/5">
+                                  <td colSpan="4" className="px-3.5 pb-3.5 pt-1 border-b border-slate-800/60">
+                                    <div className="flex flex-wrap gap-5">
+                                      <div>
+                                        <div className="text-[11px] font-bold text-emerald-400 mb-1.5">+ Received</div>
+                                        {renderDenomChips(t.denomination_breakdown.received, 'emerald') || <span className="text-xs text-slate-500">—</span>}
+                                      </div>
+                                      {sumDenom(t.denomination_breakdown.returned) > 0 && (
+                                        <div>
+                                          <div className="text-[11px] font-bold text-red-400 mb-1.5">− Returned</div>
+                                          {renderDenomChips(t.denomination_breakdown.returned, 'red')}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          )
+                        })}
+                      </TBody>
+                    </Table>
+                  </Card>
                 )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-      {/* ─── COMMISSION TAB ─── */}
-      {activeTab === 'commission' && (
-        <div>
-          <div style={{ marginBottom: '16px', padding: '12px 16px', backgroundColor: '#fff3e0', borderRadius: '8px', border: '1px solid #ff9800', fontSize: '13px', color: '#e65100', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-            <Lightbulb size={15} style={{ flexShrink: 0, marginTop: '1px' }} />
-            <span>Commission entries sirf <strong>Daily Sales → Add Expense → Category: Commission</strong> se add hoti hain.
-            Yahan sirf history dikhti hai.</span>
+              </Card>
+            )}
           </div>
+        )}
 
-          {commissionLoading ? (
-            <SectionLoader label="Commission entries load ho rahi hain..." />
-          ) : commissionEntries.length === 0 ? (
-            <p style={{ color: '#aaa' }}>Is mahine koi commission entry nahi hai.</p>
-          ) : (
-            <div style={styles.tableScroll}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Date & Time</th>
-                  <th style={styles.th}>Customer</th>
-                  <th style={styles.th}>Amount</th>
-                  <th style={styles.th}>Payment Mode</th>
-                  <th style={styles.th}>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {commissionEntries.map(e => (
-                  <tr key={e.id} style={styles.tr}
-                    onMouseEnter={ev => ev.currentTarget.style.backgroundColor = '#f9f9f9'}
-                    onMouseLeave={ev => ev.currentTarget.style.backgroundColor = '#fff'}
-                  >
-                    <td style={styles.td}>
-                      <div>{e.expense_date}</div>
-                      {e.created_at && <div style={{ fontSize: '11px', color: '#aaa', display: 'flex', alignItems: 'center', gap: '3px' }}><Clock size={10} /> {fmtDT(e.created_at)}</div>}
-                    </td>
-                    <td style={styles.td}>
-                      <strong>{e.customer_name || '—'}</strong>
-                    </td>
-                    <td style={styles.td}>
-                      <strong style={{ color: '#e65100', fontSize: '16px' }}>₹{e.amount}</strong>
-                    </td>
-                    <td style={styles.td}>
-                      <span style={{
-                        ...styles.badge,
-                        backgroundColor: e.payment_mode === 'upi' ? '#1565c0' : '#2e7d32',
-                        display: 'inline-flex', alignItems: 'center', gap: '4px'
-                      }}>
-                        {e.payment_mode === 'upi' ? <><Smartphone size={11} /> {e.upi_account || 'UPI'}</> : <><Banknote size={11} /> Cash</>}
-                      </span>
-                    </td>
-                    <td style={styles.td}>
-                      <span style={{ fontSize: '13px', color: '#666' }}>{e.description || '—'}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{ backgroundColor: '#fff3e0' }}>
-                  <td colSpan="2" style={{ ...styles.td, fontWeight: 'bold' }}>Total Commission</td>
-                  <td style={{ ...styles.td, fontWeight: 'bold', color: '#e65100', fontSize: '16px' }}>
-                    ₹{commissionEntries.reduce((s, e) => s + e.amount, 0)}
-                  </td>
-                  <td colSpan="2"></td>
-                </tr>
-              </tfoot>
-            </table>
+        {/* ══════════════════ COMMISSION TAB ══════════════════ */}
+        {activeTab === 'commission' && (
+          <div className="space-y-4">
+            <div className="flex items-start gap-2.5 bg-orange-500/10 border border-orange-500/30 text-orange-400 text-sm px-4 py-3 rounded-xl">
+              <Lightbulb className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>Commission entries are only added via <strong className="text-white">Daily Sales → Add Expense → Category: Commission</strong>. This is a read-only history.</span>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* ── UPI Entry Delete Modal ── */}
-      {upiDeleteModal && (
-        <Modal title={<span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Trash2 size={16} /> Entry Delete Karo</span>} onClose={() => { setUpiDeleteModal(null); setUpiDeletePassword('') }}>
-          <p style={{ fontSize: '13px', color: '#555', marginBottom: '4px' }}>Entry:</p>
-          <div style={{ backgroundColor: '#fff5f5', border: '1px solid #fdd', borderRadius: '6px', padding: '10px 14px', fontSize: '13px', color: '#c0392b', marginBottom: '16px', fontWeight: 'bold' }}>
-            {upiDeleteModal.label}
+            {commissionLoading ? (
+              <SectionLoader label="Loading commission entries..." />
+            ) : commissionEntries.length === 0 ? (
+              <p className="text-slate-500 text-sm">No commission entries this month.</p>
+            ) : (
+              <Card padded={false} className="overflow-hidden">
+                <Table minWidth="800px">
+                  <THead>
+                    <Th className="pl-4">Date & Time</Th><Th>Customer</Th><Th>Extra Bill (Gross)</Th><Th>Kept (Income)</Th><Th>Returned (Expense)</Th><Th>Payment Mode</Th><Th className="pr-4">Notes</Th>
+                  </THead>
+                  <TBody>
+                    {commissionEntries.map(e => (
+                      <Tr key={e.id}>
+                        <Td className="pl-4">
+                          <div className="text-slate-300">{e.expense_date}</div>
+                          {e.created_at && <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5"><Clock className="w-2.5 h-2.5" /> {fmtDT(e.created_at)}</div>}
+                        </Td>
+                        <Td className="font-bold text-white">{e.customer_name || '—'}</Td>
+                        <Td className="text-slate-400 font-mono">{e.commission_income ? `₹${e.commission_income.gross_amount}` : '—'}</Td>
+                        <Td>
+                          {e.commission_income
+                            ? <strong className="text-emerald-400 text-base font-mono">₹{e.commission_income.amount}</strong>
+                            : <span className="text-slate-500 text-xs">—</span>}
+                        </Td>
+                        <Td><strong className="text-orange-400 text-base font-mono">₹{e.amount}</strong></Td>
+                        <Td><Badge tone={e.payment_mode === 'upi' ? 'blue' : 'emerald'} icon={e.payment_mode === 'upi' ? Smartphone : Banknote}>{e.payment_mode === 'upi' ? (e.upi_account || 'UPI') : 'Cash'}</Badge></Td>
+                        <Td className="pr-4 text-xs text-slate-400">{e.description || '—'}</Td>
+                      </Tr>
+                    ))}
+                  </TBody>
+                  <tfoot>
+                    <tr className="bg-orange-500/5 border-t border-slate-800">
+                      <td colSpan="2" className="py-3 pl-4 pr-4 font-bold text-white">Totals</td>
+                      <td className="py-3 pr-4 font-bold text-slate-400 font-mono">₹{commissionEntries.reduce((s, e) => s + (e.commission_income?.gross_amount || 0), 0)}</td>
+                      <td className="py-3 pr-4 font-bold text-emerald-400 text-base font-mono">₹{commissionEntries.reduce((s, e) => s + (e.commission_income?.amount || 0), 0)}</td>
+                      <td className="py-3 pr-4 font-bold text-orange-400 text-base font-mono">₹{commissionEntries.reduce((s, e) => s + e.amount, 0)}</td>
+                      <td colSpan="2"></td>
+                    </tr>
+                  </tfoot>
+                </Table>
+              </Card>
+            )}
           </div>
-          <p style={{ fontSize: '12px', color: '#e74c3c', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <AlertTriangle size={13} /> Ye entry permanently delete hogi aur sab jagah se hat jaegi. Password daalo:
-          </p>
-          <form onSubmit={handleUpiDelete}>
-            <input
-              type="password"
-              placeholder="Enter password"
-              value={upiDeletePassword}
-              onChange={e => setUpiDeletePassword(e.target.value)}
-              autoFocus
-              style={{ ...styles.input, marginBottom: '16px', fontSize: '18px', letterSpacing: '4px', textAlign: 'center' }}
-            />
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                type="button"
-                onClick={() => { setUpiDeleteModal(null); setUpiDeletePassword('') }}
-                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ddd', backgroundColor: '#fff', cursor: 'pointer', fontSize: '14px' }}
-              >Cancel</button>
-              <LoadingButton
-                loading={upiDeleteLoading}
-                loadingText="Deleting..."
-                type="submit"
-                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #800000', backgroundColor: '#800000', color: '#fff', fontSize: '14px', fontWeight: 'bold' }}
-              ><Trash2 size={13} style={{ marginRight: '4px', verticalAlign: 'middle' }} />Delete</LoadingButton>
-            </div>
-          </form>
+        )}
+
+        {/* UPI ENTRY DELETE MODAL */}
+        <Modal open={!!upiDeleteModal} onClose={() => { setUpiDeleteModal(null); setUpiDeletePassword('') }} width="360px">
+          {upiDeleteModal && (
+            <>
+              <h3 className="text-red-400 font-bold mb-2 flex items-center gap-2"><Trash2 className="w-4 h-4" /> Delete Entry</h3>
+              <p className="text-xs text-slate-400 mb-1.5">Entry:</p>
+              <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-3.5 py-2.5 text-xs text-red-400 font-bold mb-4">{upiDeleteModal.label}</div>
+              <p className="text-xs text-red-400 mb-4 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> This entry will be permanently deleted everywhere. Enter password to confirm:</p>
+              <form onSubmit={handleUpiDelete}>
+                <input
+                  type="password" placeholder="Enter password" value={upiDeletePassword}
+                  onChange={e => setUpiDeletePassword(e.target.value)} autoFocus
+                  className={`${inputClasses} mb-4 text-lg tracking-widest text-center`}
+                />
+                <div className="flex gap-2.5">
+                  <SecondaryButton type="button" className="flex-1 justify-center" onClick={() => { setUpiDeleteModal(null); setUpiDeletePassword('') }}>Cancel</SecondaryButton>
+                  <LoadingButton loading={upiDeleteLoading} loadingText="Deleting..." type="submit" className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold">
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                  </LoadingButton>
+                </div>
+              </form>
+            </>
+          )}
         </Modal>
-      )}
 
-      {/* ── Add Vendor Modal ── */}
-      {showAddVendor && (
-        <Modal title="Add New Vendor" onClose={() => setShowAddVendor(false)}>
+        {/* ADD VENDOR MODAL */}
+        <Modal open={showAddVendor} onClose={() => setShowAddVendor(false)} width="480px">
+          <h3 className="text-white font-bold mb-4">Add New Vendor</h3>
           <VendorForm saving={vendorSaving} onSave={handleAddVendor} onCancel={() => setShowAddVendor(false)} />
         </Modal>
-      )}
 
-      {/* ── Edit Vendor Modal ── */}
-      {editVendorData && (
-        <Modal title="Edit Vendor" onClose={() => setEditVendorData(null)}>
-          <VendorForm initial={editVendorData} saving={vendorSaving} onSave={handleEditVendor} onCancel={() => setEditVendorData(null)} />
+        {/* EDIT VENDOR MODAL */}
+        <Modal open={!!editVendorData} onClose={() => setEditVendorData(null)} width="480px">
+          <h3 className="text-white font-bold mb-4">Edit Vendor</h3>
+          {editVendorData && <VendorForm initial={editVendorData} saving={vendorSaving} onSave={handleEditVendor} onCancel={() => setEditVendorData(null)} />}
         </Modal>
-      )}
 
-      {/* ── Delete Confirm Modal ── */}
-      {deleteConfirmV && (
-        <Modal title="Delete Vendor" onClose={() => setDeleteConfirmV(null)}>
-          <p style={{ color: '#374151', fontSize: '14px', marginTop: 0, marginBottom: '20px', lineHeight: '1.6' }}>
-            Are you sure you want to delete <strong>{deleteConfirmV.name}</strong>?
-            <span style={{ display: 'block', color: '#e74c3c', fontSize: '13px', marginTop: '6px' }}>This will permanently remove all their transactions.</span>
-          </p>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={() => setDeleteConfirmV(null)} style={{ flex: 1, padding: '10px', border: '1px solid #ddd', borderRadius: '6px', background: '#fff', cursor: 'pointer' }}>Cancel</button>
-            <LoadingButton loading={vendorDeleting} onClick={handleDeleteVendor} style={{ flex: 1, padding: '10px', border: '1px solid #800000', borderRadius: '6px', background: '#800000', color: '#fff', fontWeight: 700 }}>Yes, Delete</LoadingButton>
-          </div>
+        {/* DELETE VENDOR CONFIRM MODAL */}
+        <Modal open={!!deleteConfirmV} onClose={() => setDeleteConfirmV(null)} width="380px">
+          {deleteConfirmV && (
+            <>
+              <h3 className="text-white font-bold mb-3">Delete Vendor</h3>
+              <p className="text-sm text-slate-300 mb-1.5 leading-relaxed">
+                Are you sure you want to delete <strong className="text-white">{deleteConfirmV.name}</strong>?
+              </p>
+              <p className="text-xs text-red-400 mb-5">This will permanently remove all their transactions.</p>
+              <div className="flex gap-2.5">
+                <SecondaryButton className="flex-1 justify-center" onClick={() => setDeleteConfirmV(null)}>Cancel</SecondaryButton>
+                <LoadingButton loading={vendorDeleting} onClick={handleDeleteVendor} className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-bold">
+                  Yes, Delete
+                </LoadingButton>
+              </div>
+            </>
+          )}
         </Modal>
-      )}
-    </div>
+      </div>
     </PageLock>
   )
-}
-
-const styles = {
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-  message: { backgroundColor: '#e8f5e9', color: '#2e7d32', padding: '10px 16px', borderRadius: '6px', marginBottom: '16px', cursor: 'pointer' },
-  filterRow: { display: 'flex', gap: '12px', marginBottom: '20px' },
-  summaryRow: { display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' },
-  summaryCard: { flex: '1', minWidth: '140px', backgroundColor: '#fff', padding: '16px', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', cursor: 'pointer' },
-  tabRow: { display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' },
-  tab: { padding: '10px 20px', borderRadius: '8px', border: '1px solid #ddd', backgroundColor: '#fff', cursor: 'pointer', fontSize: '14px' },
-  activeTab: { backgroundColor: '#1a1a2e', color: '#fff', border: '1px solid #1a1a2e' },
-  addBtn: { backgroundColor: '#1a1a2e', color: '#fff', border: '1px solid #1a1a2e', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' },
-  formBox: { backgroundColor: '#fff', padding: '20px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
-  formRow: { display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' },
-  input: { width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px', boxSizing: 'border-box' },
-  label: { fontSize: '12px', color: '#888', display: 'block', marginBottom: '4px' },
-  submitBtn: { backgroundColor: '#1a1a2e', color: '#fff', border: 'none', padding: '10px 24px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' },
-  tableScroll: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
-  table: { width: '100%', minWidth: '650px', borderCollapse: 'collapse', backgroundColor: '#fff', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-  th: { padding: '10px 14px', textAlign: 'left', backgroundColor: '#f8f8f8', fontSize: '13px', color: '#555', borderBottom: '1px solid #eee' },
-  td: { padding: '10px 14px', fontSize: '14px', borderBottom: '1px solid #f0f0f0' },
-  tr: { backgroundColor: '#fff' },
-  badge: { padding: '3px 10px', borderRadius: '12px', color: '#fff', fontSize: '12px', textTransform: 'capitalize' },
-  detailRow: { display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f0f0f0' },
-  detailLabel: { fontSize: '12px', color: '#888', fontWeight: 'bold' },
-  detailValue: { fontSize: '14px', color: '#333', textAlign: 'right' },
-  vendorCard: { backgroundColor: '#fff', padding: '14px 16px', borderRadius: '8px', marginBottom: '10px', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' },
-  vendorStat: { flex: '1', minWidth: '100px', backgroundColor: '#f8f8f8', padding: '12px', borderRadius: '8px', textAlign: 'center' },
-  txnTypeBtn: { padding: '8px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }
 }
 
 export default Accounts

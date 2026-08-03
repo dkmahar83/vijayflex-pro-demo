@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react'
 import { getDashboard, sendBillWhatsApp, getWhatsAppStatus } from '../services/api'
 import { useNavigate } from 'react-router-dom'
 import SectionLoader from '../components/SectionLoader'
+import SectionCard from '../components/ui/SectionCard'
+import StatCard from '../components/ui/StatCard'
+import Badge from '../components/ui/Badge'
+import Modal from '../components/ui/Modal'
+import { PrimaryButton, SecondaryButton } from '../components/ui/Button'
+import { Table, THead, Th, TBody, TFoot, Tr, Td } from '../components/ui/Table'
 import {
   Package,
   PackageX,
@@ -16,7 +22,6 @@ import {
   ChevronDown,
   ChevronRight,
   Send,
-  BarChart3,
   Sun,
   Cloud,
   CloudRain,
@@ -27,12 +32,19 @@ import {
   Printer,
 } from 'lucide-react'
 
-// Clock ke liye seven-segment font — sirf hero-clock par use hota hai,
-// kahin aur typography nahi badalti. Font CDN se load hoti hai (koi local
-// file download nahi chahiye, koi bundler-resolve bhi nahi chahiye).
-const DSEG7_FONT_ID  = 'vf-dseg7-font'
-const DSEG7_FONT_URL = 'https://cdn.jsdelivr.net/npm/@fontsource/dseg7-classic@5.2.5/700.css'
-const DSEG7_STACK    = "'DSEG7 Classic', 'Courier New', monospace"
+const DUE_FILTERS = [
+  { key: 'overdue', label: 'Overdue',   icon: AlertTriangle },
+  { key: 'today',   label: 'Today',     icon: Bell },
+  { key: 'week',    label: 'This Week', icon: CalendarDays },
+  { key: 'all',     label: 'All',       icon: ListFilter },
+]
+
+const UPI_ACCOUNTS_FOR_WA = [
+  { label: 'Demo UPI Account 1', upiId: 'demo1@upi' },
+  { label: 'Demo UPI Account 2', upiId: 'demo2@upi' },
+  { label: 'Demo UPI Account 3', upiId: 'demo3@upi' },
+  { label: 'Demo UPI Account 4', upiId: 'demo4@upi' },
+]
 
 function Dashboard() {
   const [data, setData]       = useState(null)
@@ -50,7 +62,20 @@ function Dashboard() {
   const [weather, setWeather] = useState(null)
   const [locationName, setLocationName] = useState('')
   const [weatherError, setWeatherError] = useState('')
+  const [activityLimit, setActivityLimit] = useState(20)
+  const [loadingMoreActivity, setLoadingMoreActivity] = useState(false)
   const navigate = useNavigate()
+
+  // Logged-in user ka naam — same localStorage key jo App.jsx login ke time
+  // set karta hai. Sirf read kar rahe hain, koi naya auth/API call nahi.
+  const greetName = (() => {
+    try {
+      const u = JSON.parse(localStorage.getItem('flexshop_user') || 'null')
+      return u?.name || u?.username || ''
+    } catch {
+      return ''
+    }
+  })()
 
   // Har card kis section-id ko scroll karega jab wo open ho
   const SECTION_IDS = { stats: 'stats-section', lowStock: 'low-stock-section', todayOrders: 'today-orders-section', dues: 'dues-section' }
@@ -78,23 +103,24 @@ function Dashboard() {
     })
   }
 
-  // Clock-font ko document head mein ek baar inject karo (CDN link).
-  // Duplicate-safe hai — agar pehle se present hai to dobara nahi daalega.
   useEffect(() => {
-    if (!document.getElementById(DSEG7_FONT_ID)) {
-      const link = document.createElement('link')
-      link.id = DSEG7_FONT_ID
-      link.rel = 'stylesheet'
-      link.href = DSEG7_FONT_URL
-      document.head.appendChild(link)
-    }
-  }, [])
-
-  useEffect(() => {
-    getDashboard()
+    getDashboard(activityLimit)
       .then(res => { setData(res.data); setLoading(false) })
       .catch(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Recent Activity "Show last 50" / "Show last 20" toggle — refetches the
+  // whole dashboard (it's one combined endpoint) but only the activity count
+  // actually changes for the person, everything else just re-renders the same.
+  function handleToggleActivityLimit() {
+    const nextLimit = activityLimit === 20 ? 50 : 20
+    setLoadingMoreActivity(true)
+    getDashboard(nextLimit)
+      .then(res => { setData(res.data); setActivityLimit(nextLimit) })
+      .catch(() => {})
+      .finally(() => setLoadingMoreActivity(false))
+  }
 
   useEffect(() => {
     getWhatsAppStatus()
@@ -116,7 +142,6 @@ function Dashboard() {
     return () => clearInterval(timer)
   }, [])
 
-  // Weather + location — browser geolocation, phir 2 free no-key APIs:
   // Open-Meteo (weather) + BigDataCloud (city naam). Permission deny ho
   // ya API fail ho to silently gracefully skip ho jaata hai.
   useEffect(() => {
@@ -146,7 +171,7 @@ function Dashboard() {
   }, [])
 
   if (loading) return <SectionLoader label="Dashboard load ho raha hai..." size="large" minHeight="60vh" />
-  if (!data)   return <p style={{ padding: '20px' }}>Could not load dashboard.</p>
+  if (!data)   return <p className="text-slate-400 p-5">Could not load dashboard.</p>
 
   const today = data.date
 
@@ -188,414 +213,417 @@ function Dashboard() {
 
   const lowStockCount = data.low_stock_alerts?.length || 0
 
+  const recentActivity = data.recent_activity || []
+
   return (
-    <div style={styles.page}>
-      {/* Hover / fade-in animations — sirf yahi component ke liye scoped
-          (vf- prefix), baaki app ki styling se koi conflict nahi. */}
-      <style>{`
-        .vf-nav-card {
-          transition: transform .22s cubic-bezier(.4,0,.2,1), box-shadow .22s ease, border-color .22s ease;
-        }
-        .vf-nav-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 16px 30px rgba(0,0,0,0.28);
-          border-color: rgba(255,255,255,0.28);
-        }
-        .vf-nav-card-active:hover {
-          box-shadow: 0 16px 30px rgba(0,0,0,0.16);
-          border-color: rgba(233,69,96,0.35);
-        }
-        @keyframes vfFadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .vf-fade-in { animation: vfFadeIn .35s ease both; }
-        @media (prefers-reduced-motion: reduce) {
-          .vf-nav-card, .vf-fade-in { transition: none; animation: none; }
-        }
-      `}</style>
+    <div className="space-y-7">
+      {/* ── HERO PANEL — day-progress timeline, date, weather+location, and
+          an accordion of nav-cards that expand the sections below. This
+          panel is real existing functionality with no equivalent in the
+          Stitch mock, so it's re-skinned to the same slate/blue design
+          language rather than removed. ── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 shadow-2xl p-6 md:p-10">
+        {/* Ambient glow — purely decorative, no data implied */}
+        <div className="absolute inset-0 opacity-20 bg-gradient-to-br from-blue-600/20 via-transparent to-sky-400/20 pointer-events-none" />
+        <div className="absolute -top-32 -right-32 w-96 h-96 bg-blue-600/15 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-sky-400/10 rounded-full blur-[100px] pointer-events-none" />
 
-      {/* ── HERO PANEL — world-time-card style: full-width dominant digital
-          clock, edge-to-edge timeline, date, weather+location, aur ek
-          branded photo-panel (right side). ── */}
-      <div style={styles.hero}>
-        <div style={styles.heroLeft}>
-          <div style={styles.heroBrandRow}>
-            <Printer size={14} />
-            <span>VIJAYFLEX PRO</span>
-            <span style={styles.liveDot} />
-            <span style={styles.liveText}>LIVE</span>
-          </div>
-
-          <div style={styles.heroTimeRow}>
-            <span>{istParts.hours}</span>
-            <span style={styles.heroColon}>:</span>
-            <span>{istParts.minutes}</span>
-            <span style={styles.heroColon}>:</span>
-            <span>{istParts.seconds}</span>
-          </div>
-
-          {/* Day progress bar — 24-ghante ka visual, current time ka marker.
-              Reference ke timeline-line ka single-dashboard adaptation, edge-to-edge. */}
-          <div style={styles.dayProgressWrap}>
-            <div style={styles.dayProgressTrack}>
-              <div style={{ ...styles.dayProgressFill, width: `${dayProgressPct}%` }} />
-              <div style={{ ...styles.dayProgressDot, left: `${dayProgressPct}%` }} />
-            </div>
-            <div style={styles.dayProgressLabels}>
-              <span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>12 AM</span>
-            </div>
-          </div>
-
-          <div style={styles.heroDateRow}>
-            <div>
-              <div style={styles.heroDay}>{dayName}</div>
-              <div style={styles.heroDate}>{dateShort}</div>
+        <div className="relative flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/60 text-xs font-mono text-slate-300">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> System Live
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold tracking-wider text-slate-500">
+                <Printer className="w-3.5 h-3.5" /> VIJAYFLEX PRO
+              </span>
             </div>
 
-            {weather && wInfo && WeatherIcon && (
-              <div style={styles.heroWeather}>
-                <WeatherIcon size={17} />
-                <span>{Math.round(weather.temperature)}°C</span>
-                <span style={{ opacity: 0.6, fontWeight: 400 }}>{wInfo.label}</span>
-                {locationName && (
-                  <span style={styles.heroLocation}>
-                    <MapPin size={12} /> {locationName}
-                  </span>
-                )}
-              </div>
-            )}
-            {!weather && weatherError && (
-              <div style={styles.heroWeatherMuted}>
-                <MapPin size={12} /> {weatherError}
-              </div>
-            )}
+            <h1 className="text-3xl md:text-5xl font-extrabold text-white tracking-tight mb-3">
+              {greetingWord(istParts.hours)}{greetName ? `, ${greetName}` : ''}.
+            </h1>
+
+            <p className="text-sm md:text-base text-slate-400 max-w-xl leading-relaxed">
+              {data.pending_orders} pending order{data.pending_orders !== 1 ? 's' : ''}, {allDues.length} customer{allDues.length !== 1 ? 's' : ''} with dues
+              {lowStockCount > 0 && <> and <span className="text-amber-400 font-semibold">{lowStockCount} low stock alert{lowStockCount !== 1 ? 's' : ''}</span></>}.
+            </p>
           </div>
 
-          {/* NAV CARDS — Summary Stats / Low Stock / Today's Orders / Due Payments.
-              Reference ke timezone-cards jaisa premium glass look. Click =
-              accordion open + smooth scroll; doosra khula ho to woh band ho jaata hai. */}
-          <div style={styles.navGrid}>
-            <button
-              onClick={() => toggleSection('stats')}
-              className={`vf-nav-card ${!collapsed.stats ? 'vf-nav-card-active' : ''}`}
-              style={{ ...styles.navCard, ...(!collapsed.stats ? styles.navCardActive : {}) }}
-            >
-              <div style={styles.navCardTop}>
-                <div style={{ ...styles.navCardIconWrap, ...(!collapsed.stats ? styles.navCardIconWrapActive : {}) }}>
-                  <BarChart3 size={17} />
+          {/* Weather card */}
+          <div className="shrink-0 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl px-5 py-4 min-w-[190px]">
+            <div className="text-[10px] font-mono text-slate-500 uppercase tracking-wider mb-1.5">Current Weather</div>
+            {weather && wInfo && WeatherIcon ? (
+              <>
+                <div className="flex items-center gap-2 text-white">
+                  <WeatherIcon className="w-5 h-5" />
+                  <span className="text-xl font-bold">{Math.round(weather.temperature)}°C</span>
                 </div>
-                {!collapsed.stats ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                <div className="text-xs text-slate-400 mt-1">
+                  {wInfo.label}{locationName && ` • ${locationName}`}
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-slate-500 flex items-center gap-1.5">
+                <MapPin className="w-3 h-3" /> {weatherError || 'Locating...'}
               </div>
-              <div style={styles.navCardLabel}>Summary Stats</div>
-              <div style={styles.navCardSub}>Full business overview</div>
-            </button>
-
-            {lowStockCount > 0 && (
-              <button
-                onClick={() => toggleSection('lowStock')}
-                className={`vf-nav-card ${!collapsed.lowStock ? 'vf-nav-card-active' : ''}`}
-                style={{ ...styles.navCard, ...(!collapsed.lowStock ? styles.navCardActive : {}) }}
-              >
-                <div style={styles.navCardTop}>
-                  <div style={{ ...styles.navCardIconWrap, ...(!collapsed.lowStock ? styles.navCardIconWrapActive : {}) }}>
-                    <Package size={17} />
-                  </div>
-                  {!collapsed.lowStock ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                </div>
-                <div style={styles.navCardValue}>{lowStockCount}</div>
-                <div style={styles.navCardLabel}>Low Stock Alerts</div>
-              </button>
             )}
-
-            <button
-              onClick={() => toggleSection('todayOrders')}
-              className={`vf-nav-card ${!collapsed.todayOrders ? 'vf-nav-card-active' : ''}`}
-              style={{ ...styles.navCard, ...(!collapsed.todayOrders ? styles.navCardActive : {}) }}
-            >
-              <div style={styles.navCardTop}>
-                <div style={{ ...styles.navCardIconWrap, ...(!collapsed.todayOrders ? styles.navCardIconWrapActive : {}) }}>
-                  <ClipboardList size={17} />
-                </div>
-                {!collapsed.todayOrders ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-              </div>
-              <div style={styles.navCardValue}>{data.today_orders_list.length}</div>
-              <div style={styles.navCardLabel}>Today's Orders</div>
-            </button>
-
-            <button
-              id="dues-nav-card"
-              onClick={() => toggleSection('dues')}
-              className={`vf-nav-card ${!collapsed.dues ? 'vf-nav-card-active' : ''}`}
-              style={{ ...styles.navCard, ...(!collapsed.dues ? styles.navCardActive : {}) }}
-            >
-              <div style={styles.navCardTop}>
-                <div style={{ ...styles.navCardIconWrap, ...(!collapsed.dues ? styles.navCardIconWrapActive : {}) }}>
-                  <Wallet size={17} />
-                </div>
-                {!collapsed.dues ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-              </div>
-              <div style={styles.navCardValue}>{allDues.length}</div>
-              <div style={styles.navCardLabel}>Due Payments</div>
-            </button>
           </div>
         </div>
 
-        {/* Branded photo-panel. Real shop-photo daalni ho to yahan
-            background/img replace kar dena — abhi placeholder-branding hai. */}
-        <div style={styles.heroRight}>
-          {/* REAL SHOP PHOTO: yahan <img src="/shop-photo.jpg" style={styles.heroPhotoImg} /> daalo agar chahiye */}
-          <div style={styles.heroPhotoIconWrap}>
-            <Printer size={30} />
+        {/* Day + progress row */}
+        <div className="relative mt-8 pt-5 border-t border-white/10 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="shrink-0">
+            <div className="text-sm font-bold text-white">{dayName}</div>
+            <div className="text-[11px] text-white/40">{dateShort}</div>
           </div>
-          <div style={styles.heroPhotoBrand}>VijayFlex Pro</div>
-          <div style={styles.heroPhotoTagline}>Flex &nbsp;•&nbsp; Print &nbsp;•&nbsp; Signage</div>
+          <div className="flex-1">
+            <div className="relative h-1.5 rounded-full bg-white/10">
+              <div
+                className="absolute top-0 left-0 h-full rounded-full bg-gradient-to-r from-emerald-500 to-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.6)]"
+                style={{ width: `${dayProgressPct}%` }}
+              />
+              <div
+                className="absolute top-1/2 w-3 h-3 rounded-full bg-white shadow-[0_0_0_4px_rgba(255,255,255,0.15)]"
+                style={{ left: `${dayProgressPct}%`, transform: 'translate(-50%, -50%)' }}
+              />
+            </div>
+            <div className="flex justify-between text-[9px] text-white/25 mt-1.5">
+              <span>12 AM</span><span>6 AM</span><span>12 PM</span><span>6 PM</span><span>12 AM</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── KPI CARDS — Pending Orders / Low Stock / Today's Orders / Due Payments.
+          Click = accordion open + smooth scroll; doosra khula ho to woh band.
+          Same toggleSection/openSection logic as before, only the tile look
+          changed (bigger, bolder — Stitch-inspired). ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard
+          icon={ClipboardList}
+          value="Summary"
+          label="Stats"
+          sub="Full business overview"
+          tone="blue"
+          open={!collapsed.stats}
+          onClick={() => toggleSection('stats')}
+        />
+
+        {lowStockCount > 0 && (
+          <KpiCard
+            icon={Package}
+            value={lowStockCount}
+            label="Low Stock Alerts"
+            sub="Items need reordering"
+            tone="amber"
+            open={!collapsed.lowStock}
+            onClick={() => toggleSection('lowStock')}
+          />
+        )}
+
+        <KpiCard
+          icon={CalendarDays}
+          value={data.today_orders_list.length}
+          label="Today's Orders"
+          sub="Live order queue"
+          tone="emerald"
+          open={!collapsed.todayOrders}
+          onClick={() => toggleSection('todayOrders')}
+        />
+
+        <KpiCard
+          icon={Wallet}
+          value={allDues.length}
+          label="Due Payments"
+          sub={`₹XXXXX outstanding`}
+          tone="red"
+          open={!collapsed.dues}
+          onClick={() => toggleSection('dues')}
+        />
+      </div>
+
+      {/* ── QUICK ACTION + RECENT ACTIVITY — always visible (not behind the
+          accordion), matching the Stitch layout. Recent Activity is real data
+          from the new `recent_activity` field the backend now returns (built
+          from `orders` + `customers` — the only schema already confirmed in
+          dashboard.js). Falls back gracefully if that field isn't there yet. ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div
+          onClick={() => navigate('/orders')}
+          className="group relative lg:col-span-1 min-h-[320px] rounded-3xl overflow-hidden border border-white/10 shadow-2xl cursor-pointer flex flex-col items-center justify-center text-center p-8 bg-gradient-to-br from-brand to-brand-dark"
+        >
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.22),transparent_60%)] pointer-events-none" />
+          <div className="relative w-16 h-16 rounded-full bg-white/15 backdrop-blur border border-white/25 flex items-center justify-center mb-5 shadow-xl group-hover:scale-110 transition-transform duration-300">
+            <Printer className="w-8 h-8 text-white" />
+          </div>
+          <div className="relative text-2xl font-extrabold text-white tracking-tight mb-1.5">VijayFlex Pro</div>
+          <div className="relative flex items-center gap-2 text-[11px] font-semibold text-white/80 tracking-widest uppercase mb-6">
+            <span>Flex</span><span className="w-1 h-1 rounded-full bg-white/50" />
+            <span>Print</span><span className="w-1 h-1 rounded-full bg-white/50" />
+            <span>Signage</span>
+          </div>
+          <span className="relative inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/15 group-hover:bg-white/25 border border-white/30 text-white text-sm font-bold transition-all group-hover:px-6">
+            New Order <ChevronRight className="w-4 h-4" />
+          </span>
+        </div>
+
+        <div className="lg:col-span-2 bg-slate-900/90 border border-slate-800/90 rounded-3xl p-6 md:p-8 shadow-xl flex flex-col min-h-[320px]">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-5">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <ClipboardList className="w-4 h-4 text-slate-500" /> Recent Activity
+            </h3>
+            <button onClick={() => navigate('/orders')} className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors">
+              View All
+            </button>
+          </div>
+
+          {recentActivity.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-slate-500 text-sm">No recent activity yet.</p>
+            </div>
+          ) : (
+            <div className="relative flex-1 space-y-5 overflow-y-auto max-h-[480px] pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <div className="absolute left-[13px] top-1 bottom-1 w-px bg-slate-800" />
+              {recentActivity.map((act, i) => {
+                const at = ACTIVITY_TYPES[act.type] || ACTIVITY_TYPES.order
+                const ActIcon = at.icon
+                return (
+                  <div
+                    key={`${act.type}-${act.created_at}-${i}`}
+                    onClick={() => navigate('/orders')}
+                    className="relative pl-9 cursor-pointer group"
+                  >
+                    <span className={`absolute left-0 top-0 w-7 h-7 rounded-full bg-slate-950 border-2 border-slate-900 flex items-center justify-center ${at.badge}`}>
+                      <ActIcon className="w-3.5 h-3.5" />
+                    </span>
+                    <div className="flex justify-between items-start gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-white truncate group-hover:text-blue-300 transition-colors">
+                          {act.title}
+                          {act.order_number && <span className="ml-2 text-[10px] font-mono font-normal text-slate-500 align-middle">{act.order_number}</span>}
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5 truncate">
+                          {act.subtitle}{act.amount != null && ` · ₹${act.amount}`}
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-mono text-slate-500 shrink-0">{relativeTime(act.created_at)}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {recentActivity.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-800 flex justify-center shrink-0">
+              <button
+                onClick={handleToggleActivityLimit}
+                disabled={loadingMoreActivity}
+                className="text-xs font-semibold text-slate-400 hover:text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {loadingMoreActivity ? 'Loading…' : activityLimit === 20 ? 'Show last 50' : 'Show last 20'}
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${activityLimit === 50 ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── SUMMARY STATS CONTENT ── */}
       {!collapsed.stats && (
-        <div style={styles.statsRow} id="stats-section" className="vf-fade-in">
-          <div style={{ ...styles.card, borderLeft: '4px solid #3498db' }}>
-            <div style={{ ...styles.cardIconCircle, backgroundColor: '#eaf4fd', color: '#3498db' }}>
-              <ClipboardList size={18} />
-            </div>
-            <div style={styles.cardNumber}>{data.pending_orders}</div>
-            <div style={styles.cardLabel}>Pending Orders</div>
-          </div>
+        <div id="stats-section" className="vf-fade-in grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <StatCard
+            label="Pending Orders"
+            value={data.pending_orders}
+            icon={ClipboardList}
+            tone="blue"
+          />
 
-          <div
-            style={{ ...styles.card, borderLeft: '4px solid #e74c3c', cursor: 'pointer' }}
+          <StatCard
+            label="Total Outstanding"
+            value={`₹${data.total_outstanding}`}
+            valueClassName="text-red-400"
+            icon={Wallet}
+            tone="red"
             onClick={() => openSection('dues')}
-          >
-            <div style={{ ...styles.cardIconCircle, backgroundColor: '#fdecea', color: '#e74c3c' }}>
-              <Wallet size={18} />
-            </div>
-            <div style={{ ...styles.cardNumber, color: '#e74c3c' }}>₹{data.total_outstanding}</div>
-            <div style={styles.cardLabel}>Total Outstanding</div>
-          </div>
+          />
 
-          <div style={{ ...styles.card, borderLeft: `4px solid ${data.due_reminders.length > 0 ? '#f39c12' : '#27ae60'}` }}>
-            <div style={{ ...styles.cardIconCircle, backgroundColor: data.due_reminders.length > 0 ? '#fff4e5' : '#eafaf1', color: data.due_reminders.length > 0 ? '#f39c12' : '#27ae60' }}>
-              <Bell size={18} />
-            </div>
-            <div style={{ ...styles.cardNumber, color: data.due_reminders.length > 0 ? '#e74c3c' : '#27ae60' }}>
-              {data.due_reminders.length}
-            </div>
-            <div style={styles.cardLabel}>Due Reminders Today</div>
-          </div>
+          <StatCard
+            label="Due Reminders Today"
+            value={data.due_reminders.length}
+            valueClassName={data.due_reminders.length > 0 ? 'text-red-400' : 'text-emerald-400'}
+            icon={Bell}
+            tone={data.due_reminders.length > 0 ? 'amber' : 'emerald'}
+          />
 
-          <div style={{ ...styles.card, borderLeft: '4px solid #27ae60' }}>
-            <div style={{ ...styles.cardIconCircle, backgroundColor: '#eafaf1', color: '#27ae60' }}>
-              <CalendarDays size={18} />
-            </div>
-            <div style={styles.cardNumber}>{data.today_orders_list.length}</div>
-            <div style={styles.cardLabel}>Today's Orders</div>
-          </div>
+          <StatCard
+            label="Today's Orders"
+            value={data.today_orders_list.length}
+            icon={CalendarDays}
+            tone="emerald"
+          />
 
-          <div
-            style={{ ...styles.card, borderLeft: `4px solid ${lowStockCount > 0 ? '#e67e22' : '#27ae60'}`, cursor: 'pointer' }}
+          <StatCard
+            label="Low Stock Items"
+            value={lowStockCount}
+            valueClassName={lowStockCount > 0 ? 'text-red-400' : 'text-emerald-400'}
+            icon={Package}
+            tone={lowStockCount > 0 ? 'orange' : 'emerald'}
             onClick={() => openSection('lowStock')}
-          >
-            <div style={{ ...styles.cardIconCircle, backgroundColor: lowStockCount > 0 ? '#fdf2e9' : '#eafaf1', color: lowStockCount > 0 ? '#e67e22' : '#27ae60' }}>
-              <Package size={18} />
-            </div>
-            <div style={{ ...styles.cardNumber, color: lowStockCount > 0 ? '#e74c3c' : '#27ae60' }}>
-              {lowStockCount}
-            </div>
-            <div style={styles.cardLabel}>Low Stock Items</div>
-          </div>
+          />
         </div>
       )}
 
       {/* ── LOW STOCK ALERTS CONTENT ── */}
       {lowStockCount > 0 && !collapsed.lowStock && (
-        <div style={styles.section} id="low-stock-section" className="vf-fade-in">
-          <div style={styles.tableScroll}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Category</th>
-                <th style={styles.th}>Item</th>
-                <th style={styles.th}>Remaining</th>
-                <th style={styles.th}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.low_stock_alerts.map((item, i) => (
-                <tr key={i} style={styles.tr}
-                  onClick={() => navigate('/inventory')}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}
-                >
-                  <td style={styles.td}>{item.category}</td>
-                  <td style={{ ...styles.td, fontWeight: 'bold' }}>{item.item_name}</td>
-                  <td style={styles.td}>{item.quantity} {item.unit}</td>
-                  <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
-                    <span style={{
-                      ...styles.badge,
-                      backgroundColor: item.status === 'out' ? '#e74c3c' : '#f39c12',
-                      display: 'inline-flex', alignItems: 'center', gap: '4px'
-                    }}>
-                      {item.status === 'out' ? <PackageX size={12} /> : <AlertTriangle size={12} />}
-                      {item.status === 'out' ? 'Out of Stock' : 'Low Stock'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
+        <div id="low-stock-section" className="vf-fade-in">
+          <SectionCard title="Low Stock Alerts" subtitle="Items that need reordering soon">
+            <Table>
+              <THead>
+                <Th>Category</Th>
+                <Th>Item</Th>
+                <Th>Remaining</Th>
+                <Th>Status</Th>
+              </THead>
+              <TBody>
+                {data.low_stock_alerts.map((item, i) => (
+                  <Tr key={i} onClick={() => navigate('/inventory')}>
+                    <Td className="text-slate-300">{item.category}</Td>
+                    <Td className="font-bold text-white">{item.item_name}</Td>
+                    <Td className="text-slate-300">{item.quantity} {item.unit}</Td>
+                    <Td>
+                      {item.status === 'out' ? (
+                        <Badge tone="red" icon={PackageX}>Out of Stock</Badge>
+                      ) : (
+                        <Badge tone="amber" icon={AlertTriangle}>Low Stock</Badge>
+                      )}
+                    </Td>
+                  </Tr>
+                ))}
+              </TBody>
+            </Table>
+          </SectionCard>
         </div>
       )}
 
       {/* ── TODAY'S ORDERS CONTENT ── */}
       {!collapsed.todayOrders && (
-        <div style={styles.section} id="today-orders-section" className="vf-fade-in">
-          {data.today_orders_list.length === 0 ? (
-            <p style={{ color: '#888' }}>No orders today yet.</p>
-          ) : (
-            <div style={styles.tableScroll}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>Order ID</th>
-                  <th style={styles.th}>Firm</th>
-                  <th style={styles.th}>Description</th>
-                  <th style={styles.th}>Status</th>
-                  <th style={styles.th}>Amount</th>
-                  <th style={styles.th}>Balance Due</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.today_orders_list.map(o => (
-                  <tr key={o.id} style={styles.tr}
-                    onClick={() => navigate('/orders')}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#fff'}
-                  >
-                    <td style={styles.td}>#{o.id}</td>
-                    <td style={styles.td}>{o.firm_name}</td>
-                    <td style={styles.td}>{o.description}</td>
-                    <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
-                      <span style={{ ...styles.badge, backgroundColor: statusColor(o.status) }}>
-                        {o.status?.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td style={styles.td}>₹{o.total_amount}</td>
-                    <td style={styles.td}>
-                      <span style={{ color: o.balance_due > 0 ? '#e74c3c' : '#27ae60', fontWeight: 'bold' }}>
-                        ₹{o.balance_due}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-          )}
+        <div id="today-orders-section" className="vf-fade-in">
+          <SectionCard title="Today's Orders" subtitle="Live order queue and payment statuses">
+            {data.today_orders_list.length === 0 ? (
+              <p className="text-slate-500 text-sm py-2">No orders today yet.</p>
+            ) : (
+              <Table>
+                <THead>
+                  <Th>Order ID</Th>
+                  <Th>Firm</Th>
+                  <Th>Description</Th>
+                  <Th>Status</Th>
+                  <Th>Amount</Th>
+                  <Th>Balance Due</Th>
+                </THead>
+                <TBody>
+                  {data.today_orders_list.map(o => (
+                    <Tr key={o.id} onClick={() => navigate('/orders')}>
+                      <Td className="font-mono font-bold text-blue-400">#{o.id}</Td>
+                      <Td className="font-semibold text-white">{o.firm_name}</Td>
+                      <Td className="text-slate-300">{o.description}</Td>
+                      <Td><Badge tone={statusTone(o.status)}>{o.status?.replace('_', ' ')}</Badge></Td>
+                      <Td className="font-mono text-slate-200">₹{o.total_amount}</Td>
+                      <Td>
+                        <span className={`font-mono font-bold ${o.balance_due > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                          ₹{o.balance_due}
+                        </span>
+                      </Td>
+                    </Tr>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+          </SectionCard>
         </div>
       )}
 
       {/* ── DUE PAYMENTS CONTENT ── */}
       {!collapsed.dues && (
-        <div style={styles.section} id="dues-section" className="vf-fade-in">
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', flexWrap: 'wrap', gap: '10px' }}>
-            <input
-              type="text"
-              placeholder="Search by firm name or phone..."
-              value={duesSearch}
-              onChange={e => setDuesSearch(e.target.value)}
-              style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '13px', minWidth: '240px', flex: '1 1 240px', maxWidth: '340px' }}
-            />
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {[
-                { key: 'overdue', label: 'Overdue',   icon: AlertTriangle },
-                { key: 'today',   label: 'Today',      icon: Bell },
-                { key: 'week',    label: 'This Week',  icon: CalendarDays },
-                { key: 'all',     label: 'All',        icon: ListFilter }
-              ].map(f => {
-                const FIcon = f.icon
-                return (
-                  <button key={f.key}
-                    onClick={() => setDueDateFilter(f.key)}
-                    style={{
-                      padding: '6px 14px', borderRadius: '6px', border: '1px solid #ddd',
-                      backgroundColor: dueDateFilter === f.key ? '#1a1a2e' : '#fff',
-                      color: dueDateFilter === f.key ? '#fff' : '#555',
-                      cursor: 'pointer', fontSize: '13px', fontWeight: dueDateFilter === f.key ? 'bold' : 'normal',
-                      display: 'inline-flex', alignItems: 'center', gap: '6px'
-                    }}
-                  >
-                    <FIcon size={13} /> {f.label}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {filteredDues.length === 0 ? (
-            <div style={{ padding: '24px', textAlign: 'center', color: '#888', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-              <CheckCircle2 size={16} /> No dues for this filter.
-            </div>
-          ) : (
-            <div style={styles.tableScroll}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>#</th>
-                  <th style={styles.th}>Firm</th>
-                  <th style={styles.th}>Phone</th>
-                  <th style={styles.th}>Orders Due</th>
-                  <th style={styles.th}>Opening Balance</th>
-                  <th style={styles.th}>Total Due ↓</th>
-                  <th style={{ ...styles.th, minWidth: '120px' }}>Follow-up</th>
-                  <th style={{ ...styles.th, minWidth: '170px' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredDues.map((r, i) => {
-                  const isOverdue = r.follow_up_date && r.follow_up_date < today
-                  const isToday   = r.follow_up_date === today
+        <div id="dues-section" className="vf-fade-in">
+          <SectionCard title="Due Payments" subtitle="Clients requiring payment reminders">
+            <div className="flex justify-between flex-wrap gap-3 mb-4">
+              <input
+                type="text"
+                placeholder="Search by firm name or phone..."
+                value={duesSearch}
+                onChange={e => setDuesSearch(e.target.value)}
+                className="bg-slate-800/80 border border-slate-700/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 px-3.5 py-2 flex-1 min-w-[220px] max-w-[340px] focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/80"
+              />
+              <div className="flex gap-2 flex-wrap">
+                {DUE_FILTERS.map(f => {
+                  const FIcon = f.icon
+                  const active = dueDateFilter === f.key
                   return (
-                    <tr key={r.customer_id}
-                      style={styles.tr}
-                      onClick={() => navigate(`/customers/${r.customer_id}`)}
-                      onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
-                      onMouseLeave={e => e.currentTarget.style.backgroundColor = isOverdue ? '#fff8f8' : '#fff'}
+                    <button
+                      key={f.key}
+                      onClick={() => setDueDateFilter(f.key)}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                        active
+                          ? 'bg-blue-600 border-blue-500 text-white'
+                          : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700/80'
+                      }`}
                     >
-                      <td style={styles.td}>{i + 1}</td>
-                      <td style={{ ...styles.td, fontWeight: 'bold' }}>{r.firm_name}</td>
-                      <td style={styles.td}>{r.phone || '—'}</td>
-                      <td style={styles.td}>
-                        {r.orders_due > 0
-                          ? <>₹{r.orders_due} <span style={{ fontSize: '12px', color: '#888' }}>({r.orders_due_count} order{r.orders_due_count !== 1 ? 's' : ''})</span></>
-                          : '—'}
-                      </td>
-                      <td style={styles.td}>
-                        {r.opening_balance > 0 ? `₹${r.opening_balance}` : '—'}
-                      </td>
-                      <td style={styles.td}>
-                        <span style={{ fontWeight: 'bold', fontSize: '16px', color: '#e74c3c' }}>
-                          ₹{r.total_due}
-                        </span>
-                      </td>
-                      <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
-                        {r.follow_up_date ? (
-                          <span style={{
-                            padding: '3px 8px', borderRadius: '10px', fontSize: '12px',
-                            backgroundColor: isOverdue ? '#fff0f0' : isToday ? '#fff8e1' : '#f0f8ff',
-                            color: isOverdue ? '#e74c3c' : isToday ? '#f39c12' : '#3498db',
-                            fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px',
-                            whiteSpace: 'nowrap'
-                          }}>
-                            {isOverdue ? <AlertTriangle size={11} /> : isToday ? <Bell size={11} /> : null}
-                            {r.follow_up_date}
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
-                        <div style={styles.actionsCell}>
+                      <FIcon className="w-3.5 h-3.5" /> {f.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {filteredDues.length === 0 ? (
+              <div className="p-6 text-center text-slate-500 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-center gap-2 text-sm">
+                <CheckCircle2 className="w-4 h-4" /> No dues for this filter.
+              </div>
+            ) : (
+              <Table minWidth="760px">
+                <THead>
+                  <Th>#</Th>
+                  <Th>Firm</Th>
+                  <Th>Phone</Th>
+                  <Th>Orders Due</Th>
+                  <Th>Opening Balance</Th>
+                  <Th>Total Due ↓</Th>
+                  <Th className="min-w-[120px]">Follow-up</Th>
+                  <Th className="min-w-[110px]">Action</Th>
+                </THead>
+                <TBody>
+                  {filteredDues.map((r, i) => {
+                    const isOverdue = r.follow_up_date && r.follow_up_date < today
+                    const isToday   = r.follow_up_date === today
+                    return (
+                      <Tr key={r.customer_id} onClick={() => navigate(`/customers/${r.customer_id}`)}>
+                        <Td className="text-slate-400">{i + 1}</Td>
+                        <Td className="font-bold text-white">{r.firm_name}</Td>
+                        <Td className="text-slate-300">{r.phone || '—'}</Td>
+                        <Td className="text-slate-300">
+                          {r.orders_due > 0
+                            ? <>₹{r.orders_due} <span className="text-[11px] text-slate-500">({r.orders_due_count} order{r.orders_due_count !== 1 ? 's' : ''})</span></>
+                            : '—'}
+                        </Td>
+                        <Td className="text-slate-300">
+                          {r.opening_balance > 0 ? `₹${r.opening_balance}` : '—'}
+                        </Td>
+                        <Td>
+                          <span className="font-mono font-bold text-base text-red-400">₹{r.total_due}</span>
+                        </Td>
+                        <Td>
+                          {r.follow_up_date ? (
+                            <Badge
+                              tone={isOverdue ? 'red' : isToday ? 'amber' : 'blue'}
+                              icon={isOverdue ? AlertTriangle : isToday ? Bell : undefined}
+                            >
+                              {r.follow_up_date}
+                            </Badge>
+                          ) : '—'}
+                        </Td>
+                        <Td>
                           {r.total_due > 0 && (
                             <button
                               onClick={e => {
@@ -604,99 +632,75 @@ function Dashboard() {
                                   ? 'WhatsApp is Disabled in Demo due to security reasons.'
                                   : 'Due Payments ab customer-wise hai — single-order WA reminder yahan se abhi nahi bhej sakte. "Send Statement on WhatsApp" (Customer Profile se) use karo.')
                               }}
-                              style={{
-                                backgroundColor: '#f5f5f5', color: '#aaa', border: '1px solid #ddd',
-                                padding: '4px 10px', borderRadius: '4px', cursor: 'not-allowed',
-                                fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px',
-                                flexShrink: 0
-                              }}
                               title={waStatus === 'disabled' ? 'Disabled in Demo due to security reasons' : 'Filhaal is naye customer-wise view se single-order reminder possible nahi'}
+                              className="inline-flex items-center gap-1 bg-slate-800 text-slate-500 border border-slate-700 px-2.5 py-1 rounded-lg text-[11px] cursor-not-allowed shrink-0"
                             >
-                              <Smartphone size={12} /> WA
+                              <Smartphone className="w-3 h-3" /> WA
                             </button>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-              <tfoot>
-                <tr style={{ backgroundColor: '#f8f8f8' }}>
-                  <td colSpan="5" style={{ ...styles.td, fontWeight: 'bold' }}>
-                    Total ({filteredDues.length} customer{filteredDues.length !== 1 ? 's' : ''})
-                  </td>
-                  <td style={{ ...styles.td, fontWeight: 'bold', color: '#e74c3c', fontSize: '16px' }}>
-                    ₹{filteredDues.reduce((s, d) => s + d.total_due, 0)}
-                  </td>
-                  <td colSpan="2"></td>
-                </tr>
-              </tfoot>
-            </table>
-            </div>
-          )}
+                        </Td>
+                      </Tr>
+                    )
+                  })}
+                </TBody>
+                <TFoot>
+                  <Tr>
+                    <Td colSpan="5" className="font-bold text-white">
+                      Total ({filteredDues.length} customer{filteredDues.length !== 1 ? 's' : ''})
+                    </Td>
+                    <Td className="font-mono font-bold text-base text-red-400">
+                      ₹{filteredDues.reduce((s, d) => s + d.total_due, 0)}
+                    </Td>
+                    <Td colSpan="2"></Td>
+                  </Tr>
+                </TFoot>
+              </Table>
+            )}
+          </SectionCard>
         </div>
       )}
 
-    {waMessage && (
+      {waMessage && (
         <p
           onClick={() => setWaMessage('')}
-          style={{ position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)',
-            backgroundColor: '#1a1a2e', color: '#fff', padding: '10px 20px',
-            borderRadius: '8px', cursor: 'pointer', zIndex: 2000, fontSize: '14px' }}
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-800 border border-slate-700 text-white px-5 py-2.5 rounded-xl cursor-pointer z-[2000] text-sm shadow-2xl"
         >
           {waMessage}
         </p>
       )}
 
-      {waSendModal && (
-        <div
-          onClick={() => setWaSendModal(null)}
-          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '28px',
-              width: '380px', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}
-          >
-            <h3 style={{ marginBottom: '6px', fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Smartphone size={16} /> Payment Reminder
+      <Modal open={!!waSendModal} onClose={() => setWaSendModal(null)} width="380px">
+        {waSendModal && (
+          <>
+            <h3 className="text-white font-bold flex items-center gap-2 mb-1.5">
+              <Smartphone className="w-4 h-4" /> Payment Reminder
             </h3>
-            <p style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>
+            <p className="text-xs text-slate-400 mb-3">
               {waSendModal.firm_name} — Order #{waSendModal.order_id}
             </p>
-            <p style={{ fontSize: '13px', color: '#e74c3c', marginBottom: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <AlertTriangle size={14} /> Balance Due: ₹{waSendModal.balance_due}
+            <p className="text-xs text-red-400 font-bold mb-4 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5" /> Balance Due: ₹{waSendModal.balance_due}
             </p>
-            <label style={{ fontSize: '13px', color: '#555', display: 'block', marginBottom: '6px' }}>
+            <label className="text-xs text-slate-400 block mb-1.5">
               UPI QR bhejna hai? Account select karo:
             </label>
             <select
               value={selectedUpiForWA}
               onChange={e => setSelectedUpiForWA(e.target.value)}
-              style={{ width: '100%', padding: '10px', borderRadius: '6px',
-                border: '1px solid #ddd', fontSize: '14px', marginBottom: '20px' }}
+              className="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-xl px-3 py-2.5 text-sm mb-5 focus:outline-none focus:border-blue-500/80"
             >
               <option value="">❌ QR mat bhejo</option>
-              {[
-                { label: 'Demo UPI Account 1', upiId: 'demo1@upi' },
-                { label: 'Demo UPI Account 2', upiId: 'demo2@upi' },
-                { label: 'Demo UPI Account 3', upiId: 'demo3@upi' },
-                { label: 'Demo UPI Account 4', upiId: 'demo4@upi' }
-              ].map(acc => (
+              {UPI_ACCOUNTS_FOR_WA.map(acc => (
                 <option key={acc.upiId} value={acc.upiId}>{acc.label}</option>
               ))}
             </select>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => setWaSendModal(null)}
-                style={{ flex: 1, padding: '10px', borderRadius: '6px',
-                  border: '1px solid #ddd', backgroundColor: '#fff',
-                  cursor: 'pointer', fontSize: '14px' }}
-              >Cancel</button>
-              <button
+            <div className="flex gap-2.5">
+              <SecondaryButton className="flex-1 justify-center py-2.5" onClick={() => setWaSendModal(null)}>
+                Cancel
+              </SecondaryButton>
+              <PrimaryButton
+                icon={Send}
+                className="flex-1 justify-center py-2.5 !bg-none !bg-[#25D366] hover:!bg-[#20bd5a] !shadow-none"
                 onClick={() => {
                   sendBillWhatsApp(waSendModal.order_id, selectedUpiForWA)
                     .then(res => {
@@ -708,17 +712,67 @@ function Dashboard() {
                       setWaSendModal(null)
                     })
                 }}
-                style={{ flex: 1, padding: '10px', borderRadius: '6px',
-                  border: 'none', backgroundColor: '#25D366', color: '#fff',
-                  cursor: 'pointer', fontSize: '14px', fontWeight: 'bold',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              ><Send size={14} /> Send</button>
+              >
+                Send
+              </PrimaryButton>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
     </div>
   )
+}
+
+// Tone recipe for KpiCard — same colors StatCard/Badge already use elsewhere
+// in the app, just kept local since StatCard doesn't export its TONES map.
+const KPI_TONES = {
+  blue:    { badge: 'bg-blue-500/10 text-blue-400 border-blue-500/20',       value: 'text-white',       bar: 'bg-blue-500/60',    activeBg: 'bg-blue-600/10 border-blue-500/40', ghost: 'text-blue-400/[0.08]' },
+  emerald: { badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20', value: 'text-white',    bar: 'bg-emerald-500/60', activeBg: 'bg-emerald-600/10 border-emerald-500/40', ghost: 'text-emerald-400/[0.08]' },
+  red:     { badge: 'bg-red-500/10 text-red-400 border-red-500/20',          value: 'text-red-400',     bar: 'bg-red-500/60',     activeBg: 'bg-red-600/10 border-red-500/40', ghost: 'text-red-400/[0.08]' },
+  amber:   { badge: 'bg-amber-500/10 text-amber-400 border-amber-500/20',    value: 'text-amber-400',   bar: 'bg-amber-500/60',   activeBg: 'bg-amber-600/10 border-amber-500/40', ghost: 'text-amber-400/[0.08]' },
+}
+
+// Headline KPI tile — click toggles the matching accordion section below
+// (same openSection/toggleSection behavior the old NavCard had). Chevron
+// shows expanded/collapsed state; fixed height + spread content + colored
+// ghost icon are the visual upgrade borrowed from the Stitch mock, re-colored
+// to the app's existing slate/blue/emerald/amber/red palette.
+function KpiCard({ icon: Icon, value, label, sub, tone = 'blue', open, onClick }) {
+  const t = KPI_TONES[tone] || KPI_TONES.blue
+  return (
+    <button
+      onClick={onClick}
+      className={`group relative overflow-hidden text-left rounded-2xl border p-5 sm:p-6 shadow-lg transition-all duration-300 h-40 sm:h-44 flex flex-col justify-between ${
+        open ? t.activeBg : 'bg-slate-900/90 border-slate-800/90 hover:border-slate-700 hover:-translate-y-0.5 hover:shadow-xl'
+      }`}
+    >
+      {/* Oversized colored ghost icon, decorative only */}
+      <Icon className={`absolute -top-4 -right-4 w-24 h-24 ${t.ghost} pointer-events-none`} />
+
+      <div className="relative flex items-center justify-between">
+        <span className={`w-9 h-9 rounded-xl border flex items-center justify-center ${t.badge}`}>
+          <Icon className="w-4.5 h-4.5" />
+        </span>
+        {open ? <ChevronDown className="w-4 h-4 text-slate-300" /> : <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 transition-colors" />}
+      </div>
+
+      <div className="relative">
+        {value !== undefined && <div className={`text-3xl sm:text-4xl font-extrabold font-mono leading-none tracking-tight ${t.value}`}>{value}</div>}
+        <div className={`text-sm font-semibold text-slate-200 ${value !== undefined ? 'mt-2' : ''}`}>{label}</div>
+        {sub && <div className="text-[11px] text-slate-500 mt-1">{sub}</div>}
+      </div>
+
+      <div className={`absolute bottom-0 left-0 right-0 h-1 ${t.bar} transition-opacity ${open ? 'opacity-100' : 'opacity-0 group-hover:opacity-70'}`} />
+    </button>
+  )
+}
+
+// IST hour → "Good morning / afternoon / evening"
+function greetingWord(hour) {
+  const h = Number(hour)
+  if (h < 12) return 'Good morning'
+  if (h < 17) return 'Good afternoon'
+  return 'Good evening'
 }
 
 // Open-Meteo weathercode → icon + label (WMO codes)
@@ -733,128 +787,40 @@ function weatherInfo(code) {
   return { icon: Cloud, label: 'Cloudy' }
 }
 
-function statusColor(status) {
-  const colors = { pending: '#f39c12', in_progress: '#3498db', ready: '#27ae60', delivered: '#95a5a6' }
-  return colors[status] || '#ccc'
+function statusTone(status) {
+  const tones = { pending: 'amber', in_progress: 'blue', ready: 'emerald', delivered: 'slate' }
+  return tones[status] || 'slate'
 }
 
-const styles = {
-  // Poora page apni parent-scroll ke andar available height fill kare —
-  // neeche khali white/blank patti na bache. Apne actual top-navbar/outer
-  // padding ke hisaab se "64px" ko adjust kar lena (0 bhi kar sakte ho
-  // agar koi top navbar nahi hai).
-  page: { minHeight: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column' },
+// Icon + color per Recent Activity event type — backend's `type` field maps
+// straight to this. Reuses icons already imported elsewhere in this file
+// (no new icon dependencies).
+const ACTIVITY_TYPES = {
+  order:      { icon: ClipboardList, badge: 'text-blue-400' },
+  payment:    { icon: Wallet,        badge: 'text-emerald-400' },
+  advance:    { icon: Wallet,        badge: 'text-emerald-400' },
+  collection: { icon: Wallet,        badge: 'text-sky-400' },
+  cheque:     { icon: CheckCircle2,  badge: 'text-teal-400' },
+  whatsapp:   { icon: Smartphone,    badge: 'text-violet-400' },
+  inventory:  { icon: Package,       badge: 'text-amber-400' },
+  commission: { icon: Wallet,        badge: 'text-orange-400' },
+  expense:    { icon: Wallet,        badge: 'text-rose-400' },
+}
 
-  // ── HERO ──
-  hero: {
-    display: 'flex', gap: '32px', flexWrap: 'wrap',
-    background: 'linear-gradient(135deg, #1a1a2e, #23233f)',
-    borderRadius: '24px', padding: '40px 44px',
-    boxShadow: '0 10px 32px rgba(26,26,46,0.22)',
-    marginBottom: '28px',
-  },
-  heroLeft: { flex: '1 1 460px', display: 'flex', flexDirection: 'column' },
-  heroBrandRow: {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    fontSize: '12px', fontWeight: '700', letterSpacing: '1.2px',
-    color: 'rgba(255,255,255,0.55)', marginBottom: '22px',
-  },
-  liveDot: { width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#27ae60', marginLeft: '10px' },
-  liveText: { color: '#27ae60', letterSpacing: '1px' },
-  // Clock — reference jaisa full-width, dominant, seven-segment look.
-  // Yehi ek jagah hai jahan typography badli hai (DSEG7 Classic Bold).
-  heroTimeRow: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', width: '100%',
-    fontSize: 'clamp(46px, 9.5vw, 160px)', fontWeight: '700', color: '#fff',
-    fontVariantNumeric: 'tabular-nums', lineHeight: 1, marginBottom: '26px',
-    fontFamily: DSEG7_STACK, letterSpacing: '0.01em',
-  },
-  heroColon: { color: 'rgba(255,255,255,0.28)', fontWeight: '700' },
-  dayProgressWrap: { marginBottom: '20px' },
-  dayProgressTrack: {
-    position: 'relative', height: '6px', borderRadius: '3px',
-    backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: '6px',
-  },
-  dayProgressFill: {
-    position: 'absolute', top: 0, left: 0, height: '100%', borderRadius: '3px',
-    background: 'linear-gradient(90deg, #27ae60, #7fd3ff)',
-  },
-  dayProgressDot: {
-    position: 'absolute', top: '50%', width: '12px', height: '12px', borderRadius: '50%',
-    backgroundColor: '#fff', transform: 'translate(-50%, -50%)',
-    boxShadow: '0 0 0 4px rgba(255,255,255,0.15)',
-  },
-  dayProgressLabels: {
-    display: 'flex', justifyContent: 'space-between', fontSize: '10px',
-    color: 'rgba(255,255,255,0.3)',
-  },
-  heroDateRow: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
-    flexWrap: 'wrap', gap: '14px', paddingBottom: '24px',
-    borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '22px',
-  },
-  heroDay:  { fontSize: '19px', fontWeight: '700', color: '#fff' },
-  heroDate: { fontSize: '13px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' },
-  heroWeather: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '15px', fontWeight: '600', color: '#fff' },
-  heroWeatherMuted: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'rgba(255,255,255,0.35)' },
-  heroLocation: { display: 'flex', alignItems: 'center', gap: '3px', fontSize: '12px', color: '#7fd3ff', fontWeight: '500', paddingLeft: '8px', borderLeft: '1px solid rgba(255,255,255,0.2)', marginLeft: '2px' },
-  navGrid: {
-    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-    gap: '14px',
-  },
-  // Premium glass cards — reference ke timezone-cards jaisa.
-  navCard: {
-    display: 'flex', flexDirection: 'column', gap: '10px',
-    backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-    borderRadius: '18px', padding: '18px 20px', cursor: 'pointer',
-    color: 'rgba(255,255,255,0.85)', fontFamily: 'inherit', textAlign: 'left',
-    backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
-  },
-  navCardActive: {
-    backgroundColor: 'rgba(255,255,255,0.96)', color: '#1a1a2e', border: '1px solid rgba(255,255,255,0.9)',
-  },
-  navCardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  navCardIconWrap: {
-    width: '34px', height: '34px', borderRadius: '9px', display: 'flex',
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)', color: '#fff',
-  },
-  navCardIconWrapActive: { backgroundColor: '#1a1a2e', color: '#fff' },
-  navCardValue: { fontSize: '28px', fontWeight: '800', lineHeight: 1 },
-  navCardLabel: { fontSize: '13px', fontWeight: '600' },
-  navCardSub: { fontSize: '11px', opacity: 0.55, marginTop: '-4px' },
-  heroRight: {
-    flex: '0 1 240px', minWidth: '200px',
-    background: 'linear-gradient(160deg, #e94560, #c81d4f)',
-    borderRadius: '20px', padding: '24px',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    textAlign: 'center', gap: '6px',
-  },
-  heroPhotoImg: { width: '100%', height: '100%', objectFit: 'cover', borderRadius: '20px' },
-  heroPhotoIconWrap: {
-    width: '56px', height: '56px', borderRadius: '50%',
-    backgroundColor: 'rgba(255,255,255,0.18)', display: 'flex',
-    alignItems: 'center', justifyContent: 'center', color: '#fff', marginBottom: '8px',
-  },
-  heroPhotoBrand: { fontSize: '17px', fontWeight: '700', color: '#fff' },
-  heroPhotoTagline: { fontSize: '11px', color: 'rgba(255,255,255,0.8)', letterSpacing: '0.5px' },
-
-  // ── STAT CARDS ──
-  statsRow:   { display: 'flex', gap: '16px', marginBottom: '30px', flexWrap: 'wrap' },
-  card:       { backgroundColor: '#fff', borderRadius: '10px', padding: '20px 22px', minWidth: '170px', boxShadow: '0 2px 10px rgba(0,0,0,0.06)', textAlign: 'left' },
-  cardIconCircle: { width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '10px' },
-  cardNumber: { fontSize: '26px', fontWeight: 'bold', color: '#1a1a2e' },
-  cardLabel:  { fontSize: '13px', color: '#888', marginTop: '4px' },
-
-  // ── SECTIONS / TABLES ──
-  section:    { marginBottom: '30px' },
-  tableScroll: { overflowX: 'auto', WebkitOverflowScrolling: 'touch' },
-  table:      { width: '100%', minWidth: '600px', borderCollapse: 'collapse', backgroundColor: '#fff', borderRadius: '8px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-  th:         { padding: '12px 16px', textAlign: 'left', backgroundColor: '#f8f8f8', fontSize: '13px', color: '#555', borderBottom: '1px solid #eee' },
-  td:         { padding: '12px 16px', fontSize: '14px', borderBottom: '1px solid #f0f0f0' },
-  tr:         { backgroundColor: '#fff', cursor: 'pointer' },
-  badge:      { padding: '3px 10px', borderRadius: '12px', color: '#fff', fontSize: '12px', whiteSpace: 'nowrap', display: 'inline-block' },
-  actionsCell: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'nowrap', whiteSpace: 'nowrap' },
+// Backend now returns a proper ISO instant for created_at (already converted
+// server-side — orders/payments/etc. store IST-local text, order_activity_log/
+// inventory_log store UTC, and dashboard.js normalizes both before sending).
+// So this just needs a plain, direct parse.
+function relativeTime(raw) {
+  if (!raw) return ''
+  const d = new Date(raw)
+  if (isNaN(d.getTime())) return raw
+  const diffMin = Math.round((Date.now() - d.getTime()) / 60000)
+  if (diffMin < 1) return 'Just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.round(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  return `${Math.round(diffHr / 24)}d ago`
 }
 
 export default Dashboard

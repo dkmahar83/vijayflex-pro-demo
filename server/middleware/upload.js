@@ -4,7 +4,9 @@ const fs = require('fs');
 
 const UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'customers');
 const ORDER_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'orders');
+const EMPLOYEE_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'employees');
 fs.mkdirSync(ORDER_UPLOAD_DIR, { recursive: true });
+fs.mkdirSync(EMPLOYEE_UPLOAD_DIR, { recursive: true });
 
 // Make sure the folder exists
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -46,4 +48,14 @@ const orderStorage = multer.diskStorage({
 
 const uploadOrder = multer({ storage: orderStorage, fileFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 
-module.exports = { upload, uploadOrder };
+const employeeStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, EMPLOYEE_UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `employee_${req.params.id}_${Date.now()}${ext}`);
+  }
+});
+
+const uploadEmployee = multer({ storage: employeeStorage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+
+module.exports = { upload, uploadOrder, uploadEmployee };
