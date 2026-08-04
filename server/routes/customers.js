@@ -102,104 +102,66 @@ router.get('/:id', (req, res) => {
             `, [id], (err, cashIncomePayments) => {
               if (err) return res.status(500).json({ error: err.message });
 
-              db.all(`
-                SELECT 
-                  id,
-                  amount,
-                  expense_date as date,
-                  CASE 
-                    WHEN payment_mode = 'upi' AND upi_account IS NOT NULL 
-                    THEN upi_account 
-                    ELSE 'Cash' 
-                  END as source,
-                  'Commission' as payment_type,
-                  description,
-                  payment_mode,
-                  upi_account,
-                  created_at
-                FROM expenses
-                WHERE category = 'Commission'
-                  AND customer_id = ?
-                ORDER BY expense_date DESC
-              `, [id], (err, commissionPayments) => {
-                if (err) return res.status(500).json({ error: err.message });
+              // Opening balance ab order nahi — customer.opening_balance field se
+              // seedha yahan add hota hai.
+              const totalBilled = orders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0) + Number(customer.opening_balance || 0);
+              const totalDiscount = orders.reduce((sum, o) => sum + Number(o.discount_amount || 0), 0);
+              const totalAdvance = orders.reduce((sum, o) => sum + Number(o.advance_paid || 0), 0);
+              const totalOrderPayments = orderPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+              const totalUpi = upiPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+              const totalChequeCleared = chequePayments
+                .filter(p => p.status === 'cleared')
+                .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+              // Pehle sirf 'Cash Income' type sum hota tha — UPI-mode cash_income
+              // entries (payment_type='UPI') exclude ho jaati thi, kyunki pehle
+              // inka ek mirror-row upi_transactions mein bhi banta tha (totalUpi
+              // usko already count kar leta tha). Wo mirror-insert ab hata diya
+              // gaya hai (UPI double-counting fix ke time) — isliye cash_income hi
+              // in entries ka sole source hai, isse yahan bhi count karna zaroori
+              // hai, warna Balance Due se ye paisa poora gayab ho jaata hai.
+              const totalCashIncome = cashIncomePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-              db.all(`
-                SELECT id, gross_amount, percent, amount, return_amount, note, transaction_date, created_at
-                FROM commission_income
-                WHERE customer_id = ?
-                ORDER BY transaction_date DESC
-              `, [id], (err, commissionIncomeRows) => {
-                if (err) return res.status(500).json({ error: err.message });
+              const totalPaid = totalAdvance + totalOrderPayments + totalUpi + totalChequeCleared + totalCashIncome;
+              // NOTE: Commission ab customer ke due/balance ko bilkul touch nahi
+              // karta — ye poori tarah se ek alag, independent expense hai (Accounts
+              // → Commission tab mein hi track hoti hai). Isliye yahan uska koi
+              // query/calculation nahi hai — order/payment se jitna banta hai, utna
+              // hi due dikhta hai, jaisa customer se real mein lena-dena hai.
+              const totalDue = totalBilled - totalPaid - totalDiscount;
 
-                // Opening balance ab order nahi — customer.opening_balance field se
-                // seedha yahan add hota hai.
-                const totalBilled = orders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0) + Number(customer.opening_balance || 0);
-                const totalDiscount = orders.reduce((sum, o) => sum + Number(o.discount_amount || 0), 0);
-                const totalAdvance = orders.reduce((sum, o) => sum + Number(o.advance_paid || 0), 0);
-                const totalOrderPayments = orderPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-                const totalUpi = upiPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-                const totalChequeCleared = chequePayments
-                  .filter(p => p.status === 'cleared')
-                  .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-                // Pehle sirf 'Cash Income' type sum hota tha — UPI-mode cash_income
-                // entries (payment_type='UPI') exclude ho jaati thi, kyunki pehle
-                // inka ek mirror-row upi_transactions mein bhi banta tha (totalUpi
-                // usko already count kar leta tha). Wo mirror-insert ab hata diya
-                // gaya hai (UPI double-counting fix ke time) — isliye cash_income hi
-                // in entries ka sole source hai, isse yahan bhi count karna zaroori
-                // hai, warna Balance Due se ye paisa poora gayab ho jaata hai.
-                const totalCashIncome = cashIncomePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-                const totalCommission = commissionPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-                // Kitna commission hum apne paas rakh chuke hain is customer se (shop
-                // ka apna margin). Ye due/balance ko touch NAHI karta — customer se na
-                // lena na dena, sirf internal reporting/visibility ke liye hai. Isliye
-                // totalPaid/totalDue formula mein include nahi kiya (warna double-count
-                // ho jaayega, kyunki wo paisa already order ke total mein aa chuka tha).
-                const totalCommissionIncome = commissionIncomeRows.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+              const allPayments = [
+                ...orders.filter(o => o.advance_paid > 0).map(o => ({
+                  id: `adv-${o.id}`,
+                  amount: o.advance_paid,
+                  date: o.created_at?.split('T')[0],
+                  source: 'Advance Payment',
+                  payment_type: 'Advance',
+                  order_description: o.description
+                })),
+                ...orderPayments,
+                ...upiPayments,
+                ...chequePayments,
+                // Pehle UPI-type cash_income entries yahan se exclude hoti thi,
+                // assume karke ki unka duplicate upiPayments (upi_transactions)
+                // array mein already hai — jo purane mirror-insert ki wajah se sahi
+                // tha. Wo mirror ab nahi banta, isliye ab sab include kar rahe hain.
+                ...cashIncomePayments
+              ].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
-                const totalPaid = totalAdvance + totalOrderPayments + totalUpi + totalChequeCleared + totalCashIncome;
-                const totalDue = totalBilled - totalPaid - totalDiscount + totalCommission;
-
-                const allPayments = [
-                  ...orders.filter(o => o.advance_paid > 0).map(o => ({
-                    id: `adv-${o.id}`,
-                    amount: o.advance_paid,
-                    date: o.created_at?.split('T')[0],
-                    source: 'Advance Payment',
-                    payment_type: 'Advance',
-                    order_description: o.description
-                  })),
-                  ...orderPayments,
-                  ...upiPayments,
-                  ...chequePayments,
-                  // Pehle UPI-type cash_income entries yahan se exclude hoti thi,
-                  // assume karke ki unka duplicate upiPayments (upi_transactions)
-                  // array mein already hai — jo purane mirror-insert ki wajah se sahi
-                  // tha. Wo mirror ab nahi banta, isliye ab sab include kar rahe hain.
-                  ...cashIncomePayments,
-                  ...commissionPayments
-                ].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-
-                res.json({
-                  ...customer,
-                  orders,
-                  payments: allPayments,
-                  totalBilled,
-                  totalAdvance,
-                  totalOrderPayments,
-                  totalUpi,
-                  totalChequeCleared,
-                  totalCashIncome,
-                  totalCommission,
-                  totalCommissionIncome,
-                  commissionIncome: commissionIncomeRows,
-                  totalPaid,
-                  totalDiscount,
-                  totalDue
-                });
-              }); // commissionIncomeRows close
-              }); // commissionPayments close
+              res.json({
+                ...customer,
+                orders,
+                payments: allPayments,
+                totalBilled,
+                totalAdvance,
+                totalOrderPayments,
+                totalUpi,
+                totalChequeCleared,
+                totalCashIncome,
+                totalPaid,
+                totalDiscount,
+                totalDue
+              });
             }); // cashIncomePayments close
           }); // chequePayments close
         }); // upiPayments close

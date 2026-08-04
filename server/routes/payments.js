@@ -124,8 +124,11 @@ router.post('/', validate(createPaymentSchema), (req, res) => {
 router.get('/dues', (req, res) => {
   // CUSTOMER-WISE, TRUE net-due formula — Dashboard ke all_dues jaisa hi
   // (orders + opening_balance - advance - order_payments - UPI - cleared
-  // cheques - cash_income - discount + commission). orders_due neeche sirf
+  // cheques - cash_income - discount). orders_due neeche sirf
   // INFORMATIONAL hai; total_due hi asal sorting/filtering karta hai.
+  // NOTE: Commission is formula mein bilkul include nahi hoti — wo poori
+  // tarah alag, independent expense hai (sirf Accounts → Commission tab
+  // mein track hoti), customer ke due/balance se uska koi lena-dena nahi.
   db.all(`
     SELECT * FROM (
       SELECT
@@ -145,7 +148,6 @@ router.get('/dues', (req, res) => {
           - COALESCE(cheq.total_cheque_cleared, 0)
           - COALESCE(cash.total_cash_income, 0)
           - COALESCE(oa.orders_discount, 0)
-          + COALESCE(comm.total_commission, 0)
         ) as total_due
       FROM customers c
       LEFT JOIN (
@@ -176,9 +178,6 @@ router.get('/dues', (req, res) => {
           AND (notes IS NULL OR notes NOT LIKE 'Galla Opening Balance%')
         GROUP BY customer_id
       ) cash ON cash.customer_id = c.id
-      LEFT JOIN (
-        SELECT customer_id, SUM(amount) as total_commission FROM expenses WHERE category = 'Commission' GROUP BY customer_id
-      ) comm ON comm.customer_id = c.id
       WHERE c.deleted_at IS NULL
     )
     WHERE total_due > 0

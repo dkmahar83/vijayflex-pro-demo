@@ -274,20 +274,11 @@ router.get('/report', (req, res) => {
               `, [m, year], (err, totalExpenses) => {
                 if (err) return res.status(500).json({ error: err.message });
 
-                // 7b. Commission income — jitna hum extra-billing se apne paas rakhte
-                // hain (income). Ye total income mein separately add NAHI hota — wo
-                // paisa order-payments ke through already total income mein aa chuka
-                // hota hai. Sirf visibility ke liye dikhaya jaata hai.
-                db.get(`
-                  SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
-                  FROM commission_income
-                  WHERE strftime('%m', transaction_date) = ? AND strftime('%Y', transaction_date) = ?
-                `, [m, year], (err, commissionIncome) => {
-                if (err) return res.status(500).json({ error: err.message });
-
                 // 8. Dues — CUSTOMER-WISE, TRUE net-due formula (Dashboard jaisa hi:
                 // orders + opening_balance - advance - order-payments - UPI -
-                // cleared-cheques - cash-income - discount + commission).
+                // cleared-cheques - cash-income - discount). Commission is formula
+                // mein include NAHI hoti — wo poori tarah alag, independent expense
+                // hai (sirf Accounts → Commission tab mein track hoti).
                 db.all(`
                   SELECT * FROM (
                     SELECT
@@ -306,7 +297,6 @@ router.get('/report', (req, res) => {
                         - COALESCE(cheq.total_cheque_cleared, 0)
                         - COALESCE(cash.total_cash_income, 0)
                         - COALESCE(oa.orders_discount, 0)
-                        + COALESCE(comm.total_commission, 0)
                       ) as total_due
                     FROM customers c
                     LEFT JOIN (
@@ -337,9 +327,6 @@ router.get('/report', (req, res) => {
                         AND (notes IS NULL OR notes NOT LIKE 'Galla Opening Balance%')
                       GROUP BY customer_id
                     ) cash ON cash.customer_id = c.id
-                    LEFT JOIN (
-                      SELECT customer_id, SUM(amount) as total_commission FROM expenses WHERE category = 'Commission' GROUP BY customer_id
-                    ) comm ON comm.customer_id = c.id
                     WHERE c.deleted_at IS NULL
                   )
                   WHERE total_due > 0
@@ -349,7 +336,7 @@ router.get('/report', (req, res) => {
 
                   // 9. Total outstanding — SUM of same net-due formula, Dashboard jaisa hi
                   // (pehle sirf raw balance_due+opening_balance jodta tha, jo cash/UPI/
-                  // cheque/commission payments ignore kar deta tha).
+                  // cheque payments ignore kar deta tha).
                   db.get(`
                     WITH customer_net_due AS (
                       SELECT
@@ -361,7 +348,6 @@ router.get('/report', (req, res) => {
                           - COALESCE(cheq.total_cheque_cleared, 0)
                           - COALESCE(cash.total_cash_income, 0)
                           - COALESCE(oa.orders_discount, 0)
-                          + COALESCE(comm.total_commission, 0)
                         ) as total_due
                       FROM customers c
                       LEFT JOIN (
@@ -389,9 +375,6 @@ router.get('/report', (req, res) => {
                           AND (notes IS NULL OR notes NOT LIKE 'Galla Opening Balance%')
                         GROUP BY customer_id
                       ) cash ON cash.customer_id = c.id
-                      LEFT JOIN (
-                        SELECT customer_id, SUM(amount) as total_commission FROM expenses WHERE category = 'Commission' GROUP BY customer_id
-                      ) comm ON comm.customer_id = c.id
                       WHERE c.deleted_at IS NULL
                     )
                     SELECT COALESCE(SUM(total_due), 0) as total FROM customer_net_due WHERE total_due > 0
@@ -413,10 +396,7 @@ router.get('/report', (req, res) => {
                       },
                       expenses: { by_category: expensesByCategory, total: totalExp },
                       net_profit: totalIncome - totalExp,
-                      dues: { list: dues, total_outstanding: totalDues.total || 0 },
-                      // Note: ye income already order-payments ke through totalIncome
-                      // mein shaamil hai — is figure ko net_profit mein dobara mat jodna.
-                      commission_income: { total: commissionIncome.total || 0, count: commissionIncome.count || 0 }
+                      dues: { list: dues, total_outstanding: totalDues.total || 0 }
                     });
                   });
                 });
@@ -424,7 +404,6 @@ router.get('/report', (req, res) => {
             });
           });
         });
-        }); // commissionIncome close
       });
     });
   });
@@ -522,23 +501,12 @@ router.get('/report/yearly', (req, res) => {
               const totalIncome   = summary.reduce((s, r) => s + r.income, 0);
               const totalExpenses = summary.reduce((s, r) => s + r.expenses, 0);
 
-              // Commission income (kept %) for the year — informational only, already
-              // counted inside total_income above via order payments, not added again.
-              db.get(`
-                SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
-                FROM commission_income
-                WHERE strftime('%Y', transaction_date) = ?
-              `, [year], (err, commissionIncome) => {
-                if (err) return res.status(500).json({ error: err.message });
-
-                res.json({
-                  year,
-                  monthly_summary: summary,
-                  total_income: totalIncome,
-                  total_expenses: totalExpenses,
-                  net_profit: totalIncome - totalExpenses,
-                  commission_income: { total: commissionIncome.total || 0, count: commissionIncome.count || 0 }
-                });
+              res.json({
+                year,
+                monthly_summary: summary,
+                total_income: totalIncome,
+                total_expenses: totalExpenses,
+                net_profit: totalIncome - totalExpenses
               });
             });
           });

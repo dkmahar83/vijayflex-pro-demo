@@ -228,19 +228,6 @@ export const sendStatementWhatsApp = (customerId, upiId) => api.post(`/whatsapp/
 export const getRecycleBin = () => api.get('/customers/deleted/recent')
 export const restoreCustomer = (id) => api.put(`/customers/${id}/restore`)
 
-// Commission
-export const getCommissionHistory = (customerId) =>
-  api.get(`/commission${customerId ? `?customer_id=${customerId}` : ''}`)
-export const getCommissionBalance = (customerId) =>
-  api.get(`/commission/balance/${customerId}`)
-export const creditCommission = (data) => api.post('/commission/credit', data)
-export const returnCommission = (data) => api.post('/commission/return', data)
-
-// Commission Income (the % kept as shop income — paired with the "Commission"
-// expense category, which is the amount returned to the customer)
-export const getCommissionIncome = (params) => api.get('/commission-income', { params })
-export const getCommissionIncomeSummary = (params) => api.get('/commission-income/summary', { params })
-
 // Backup
 export const downloadBackup = () => api.get('/backup/download', { responseType: 'blob' })
 

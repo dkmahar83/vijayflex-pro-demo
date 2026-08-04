@@ -18,14 +18,12 @@ import {
   CheckCircle2,
   AlertTriangle,
   Wallet,
-  Banknote,
   Scissors,
   ClipboardList,
   Clock,
   Package,
   X,
   ArrowLeft,
-  Coins,
 } from 'lucide-react'
 
 const inputClasses = 'bg-slate-800/80 border border-slate-700/60 rounded-xl text-sm text-slate-200 placeholder-slate-500 px-3.5 py-2.5 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/80 w-full min-w-0 disabled:opacity-50 disabled:cursor-not-allowed'
@@ -431,18 +429,6 @@ function CustomerProfile() {
               <div className="bg-slate-800/40 border-l-4 border-teal-500 rounded-xl px-4 py-3 min-w-[140px]">
                 <div className="text-lg font-bold text-teal-400 font-mono">₹{customer.totalCashIncome}</div>
                 <div className="text-[11px] text-slate-400">Cash Income</div>
-              </div>
-            )}
-            {customer.totalCommission > 0 && (
-              <div className="bg-slate-800/40 border-l-4 border-orange-500 rounded-xl px-4 py-3 min-w-[140px]">
-                <div className="text-lg font-bold text-orange-400 font-mono">₹{customer.totalCommission}</div>
-                <div className="text-[11px] text-slate-400 flex items-center gap-1"><Banknote className="w-3 h-3" /> Commission Paid Out</div>
-              </div>
-            )}
-            {customer.totalCommissionIncome > 0 && (
-              <div className="bg-slate-800/40 border-l-4 border-emerald-500 rounded-xl px-4 py-3 min-w-[140px]" title="Kept from extra-bill commission — your income, doesn't affect this customer's due balance">
-                <div className="text-lg font-bold text-emerald-400 font-mono">₹{customer.totalCommissionIncome}</div>
-                <div className="text-[11px] text-slate-400 flex items-center gap-1"><Coins className="w-3 h-3" /> Commission Income (Kept)</div>
               </div>
             )}
             {customer.totalDiscount > 0 && (

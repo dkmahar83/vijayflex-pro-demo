@@ -5,8 +5,7 @@ import {
   getUpiTransactions, getUpiSummary, addUpiTransaction,
   getVendors, getVendor, addVendor, updateVendor, deleteVendor,
   addVendorPurchase, addVendorPayment,
-  getCustomers, getExpenses, deleteLedgerEntry, getSetting, getDenominationDrawer,
-  getCommissionIncome
+  getCustomers, getExpenses, deleteLedgerEntry, getSetting, getDenominationDrawer
 } from '../services/api'
 import DenominationCounter from '../components/DenominationCounter'
 import LoadingButton from '../components/LoadingButton'
@@ -303,17 +302,9 @@ function Accounts() {
   function fetchAll()    { fetchCheques(); fetchUpi(); fetchVendors() }
   function fetchCommission() {
     setCommissionLoading(true)
-    Promise.all([
-      getExpenses(filterMonth, filterYear),
-      getCommissionIncome({ month: filterMonth, year: filterYear })
-    ])
-      .then(([expRes, incomeRes]) => {
-        const incomeByExpenseId = {}
-        ;(incomeRes.data || []).forEach(row => { incomeByExpenseId[row.expense_id] = row })
-        const entries = (expRes.data || [])
-          .filter(e => e.category === 'Commission')
-          .map(e => ({ ...e, commission_income: incomeByExpenseId[e.id] || null }))
-        setCommissionEntries(entries)
+    getExpenses(filterMonth, filterYear)
+      .then(r => {
+        setCommissionEntries((r.data || []).filter(e => e.category === 'Commission'))
         setCommissionLoading(false)
       })
       .catch(() => setCommissionLoading(false))
@@ -1031,9 +1022,9 @@ function Accounts() {
               <p className="text-slate-500 text-sm">No commission entries this month.</p>
             ) : (
               <Card padded={false} className="overflow-hidden">
-                <Table minWidth="800px">
+                <Table minWidth="650px">
                   <THead>
-                    <Th className="pl-4">Date & Time</Th><Th>Customer</Th><Th>Extra Bill (Gross)</Th><Th>Kept (Income)</Th><Th>Returned (Expense)</Th><Th>Payment Mode</Th><Th className="pr-4">Notes</Th>
+                    <Th className="pl-4">Date & Time</Th><Th>Customer</Th><Th>Amount</Th><Th>Payment Mode</Th><Th className="pr-4">Notes</Th>
                   </THead>
                   <TBody>
                     {commissionEntries.map(e => (
@@ -1043,12 +1034,6 @@ function Accounts() {
                           {e.created_at && <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5"><Clock className="w-2.5 h-2.5" /> {fmtDT(e.created_at)}</div>}
                         </Td>
                         <Td className="font-bold text-white">{e.customer_name || '—'}</Td>
-                        <Td className="text-slate-400 font-mono">{e.commission_income ? `₹${e.commission_income.gross_amount}` : '—'}</Td>
-                        <Td>
-                          {e.commission_income
-                            ? <strong className="text-emerald-400 text-base font-mono">₹{e.commission_income.amount}</strong>
-                            : <span className="text-slate-500 text-xs">—</span>}
-                        </Td>
                         <Td><strong className="text-orange-400 text-base font-mono">₹{e.amount}</strong></Td>
                         <Td><Badge tone={e.payment_mode === 'upi' ? 'blue' : 'emerald'} icon={e.payment_mode === 'upi' ? Smartphone : Banknote}>{e.payment_mode === 'upi' ? (e.upi_account || 'UPI') : 'Cash'}</Badge></Td>
                         <Td className="pr-4 text-xs text-slate-400">{e.description || '—'}</Td>
@@ -1057,9 +1042,7 @@ function Accounts() {
                   </TBody>
                   <tfoot>
                     <tr className="bg-orange-500/5 border-t border-slate-800">
-                      <td colSpan="2" className="py-3 pl-4 pr-4 font-bold text-white">Totals</td>
-                      <td className="py-3 pr-4 font-bold text-slate-400 font-mono">₹{commissionEntries.reduce((s, e) => s + (e.commission_income?.gross_amount || 0), 0)}</td>
-                      <td className="py-3 pr-4 font-bold text-emerald-400 text-base font-mono">₹{commissionEntries.reduce((s, e) => s + (e.commission_income?.amount || 0), 0)}</td>
+                      <td colSpan="2" className="py-3 pl-4 pr-4 font-bold text-white">Total Commission</td>
                       <td className="py-3 pr-4 font-bold text-orange-400 text-base font-mono">₹{commissionEntries.reduce((s, e) => s + e.amount, 0)}</td>
                       <td colSpan="2"></td>
                     </tr>

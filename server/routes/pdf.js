@@ -625,27 +625,15 @@ router.get('/statement/:customerId', (req, res) => {
           `, [customerId], (err, cashIncomes) => {
             if (err) return res.status(500).json({ error: err.message })
 
-            // Commission entries expenses table mein hain (customer_id linked),
-            // cash_income mein nahi — Accounts page inhe customer ke against
-            // count karta hai (Due badhta hai), isliye alag se fetch karke
-            // Balance Due mein wapas add karna hai.
+            // Cheques table hi source-of-truth — cash_income ka 'Cheque Cleared%' row
+            // ab exclude ho chuka hai upar, statement seedha yahan se sahi label +
+            // order-link nikaalta hai.
             db.all(`
-              SELECT * FROM expenses
-              WHERE customer_id = ? AND category = 'Commission'
-              ORDER BY expense_date ASC, id ASC
-            `, [customerId], (err, commissions) => {
+              SELECT * FROM cheques WHERE customer_id = ? ORDER BY received_date ASC
+            `, [customerId], (err, cheques) => {
               if (err) return res.status(500).json({ error: err.message })
 
-              // Cheques table hi source-of-truth — cash_income ka 'Cheque Cleared%' row
-              // ab exclude ho chuka hai upar, statement seedha yahan se sahi label +
-              // order-link nikaalta hai.
-              db.all(`
-                SELECT * FROM cheques WHERE customer_id = ? ORDER BY received_date ASC
-              `, [customerId], (err, cheques) => {
-                if (err) return res.status(500).json({ error: err.message })
-
-                renderCustomerStatement(res, customer, orders, allItems, allPayments, cashIncomes || [], commissions || [], cheques || [])
-              })
+              renderCustomerStatement(res, customer, orders, allItems, allPayments, cashIncomes || [], cheques || [])
             })
           })
         })
@@ -654,7 +642,7 @@ router.get('/statement/:customerId', (req, res) => {
   })
 })
 
-function renderCustomerStatement(res, customer, orders, allItems, allPayments, cashIncomes, commissions, cheques) {
+function renderCustomerStatement(res, customer, orders, allItems, allPayments, cashIncomes, cheques) {
   const doc = new PDFDocument({ size: 'A4', margin: 0, bufferPages: true })
   const filename = `Statement-${customer.firm_name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
   res.setHeader('Content-Type', 'application/pdf')
@@ -798,17 +786,15 @@ function renderCustomerStatement(res, customer, orders, allItems, allPayments, c
   const totalPayments   = allPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0)
   const totalCash       = cashIncomes.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
   const totalDiscount   = orders.reduce((s, o) => s + parseFloat(o.discount_amount || 0), 0)
-  const totalCommission = commissions.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
   // Cleared cheques ka paisa ab cash_income ke mirror-row se nahi (wo exclude ho chuka
   // hai), seedha cheques table se — order-linked aur standalone dono, ek hi baar count.
   const totalChequesCleared = cheques.filter(c => c.status === 'cleared').reduce((s, c) => s + parseFloat(c.amount || 0), 0)
   const totalPaid       = totalAdvance + totalPayments + totalCash + totalChequesCleared
-  // Balance Due = Total Billed − Total Paid − Discount + Commission.
-  // Commission ("Commission Wapas Ki") shop se customer ko diya gaya cash hai,
-  // order se related nahi — isliye Due mein wapas add hota hai (Accounts page
-  // ke Total Due se exactly match karega). Discount iska ulta hai — maaf kiya
-  // gaya amount, isliye subtract hota hai.
-  const totalDue        = totalBilled - totalPaid - totalDiscount + totalCommission
+  // Balance Due = Total Billed − Total Paid − Discount.
+  // NOTE: Commission is calculation mein bilkul include nahi hoti — wo poori
+  // tarah alag, independent expense hai (sirf Accounts → Commission tab mein
+  // track hoti), customer ke due/balance se uska koi lena-dena nahi.
+  const totalDue        = totalBilled - totalPaid - totalDiscount
 
   const sumX = MARGIN + CONTENT - 190
   doc.fill(GRAY).fontSize(8).font('Helvetica-Bold').text('SUMMARY', sumX, INFO_TOP + 10)
@@ -979,8 +965,11 @@ function renderCustomerStatement(res, customer, orders, allItems, allPayments, c
     if (orderIdx < orders.length - 1) { hRule(currentY, '#cccccc', 0.8); currentY += 14 }
   })
 
-  // ── OTHER ACCOUNT ENTRIES — cash_income (+, green) merged with Commission (−, red) ──
+  // ── OTHER ACCOUNT ENTRIES — cash_income (+, green) ──
   // Ek hi date-sorted list mein, jaisa Accounts page ki "Complete Payment History" dikhati hai.
+  // NOTE: Commission ka is statement mein koi zikr nahi — na line-item mein, na
+  // Balance Due ke calculation mein. Wo poori tarah alag, independent expense
+  // hai jo sirf Accounts → Commission tab mein track hoti hai.
   const otherEntries = [
     ...cashIncomes.map(c => ({
       amount: parseFloat(c.amount || 0),
@@ -988,13 +977,6 @@ function renderCustomerStatement(res, customer, orders, allItems, allPayments, c
       date: c.income_date || c.created_at,
       mode: c.payment_mode === 'upi' ? `UPI${c.upi_account ? ' — ' + c.upi_account : ''}` : 'Cash',
       label: c.notes || null
-    })),
-    ...commissions.map(c => ({
-      amount: parseFloat(c.amount || 0),
-      sign: -1,
-      date: c.expense_date,
-      mode: c.payment_mode === 'upi' ? `UPI${c.upi_account ? ' — ' + c.upi_account : ''}` : 'Cash',
-      label: 'Commission Wapas Ki' + (c.description ? ' — ' + c.description : '')
     })),
     // Sirf standalone (kisi order se link na hone waale) cleared cheques — order-linked
     // waale ab apne order ke "Payment history" mein dikhte hain, dono jagah dikhane se

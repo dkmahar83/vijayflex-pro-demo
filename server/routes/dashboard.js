@@ -104,11 +104,15 @@ router.get('/', async (req, res) => {
 
     // 2. Total outstanding — ab TRUE net-due formula (customers.js ke totalDue
     // jaisa hi: orders + opening_balance − advance − order-payments − UPI −
-    // cleared-cheques − cash-income − discount + commission). Pehle sirf raw
+    // cleared-cheques − cash-income − discount). Pehle sirf raw
     // balance_due + opening_balance sum hota tha, jo customers ke cash/UPI/
-    // cheque/commission-wapasi jaisi payments ko ignore kar deta tha — isliye
+    // cheque jaisi payments ko ignore kar deta tha — isliye
     // credit-mein-chale-gaye customers (jaise Vijay Flex) bhi "due" mein
     // count ho jaate the, jabki unka asal balance negative tha.
+    // NOTE: Commission ab is due-calculation mein bilkul include nahi hoti —
+    // wo poori tarah alag, independent expense hai (sirf Accounts → Commission
+    // tab mein track hoti hai), customer ke due/balance se uska koi lena-dena
+    // nahi.
     const totalDue = await dbGetAsync(`
       WITH customer_net_due AS (
         SELECT
@@ -121,7 +125,6 @@ router.get('/', async (req, res) => {
             - COALESCE(cheq.total_cheque_cleared, 0)
             - COALESCE(cash.total_cash_income, 0)
             - COALESCE(oa.orders_discount, 0)
-            + COALESCE(comm.total_commission, 0)
           ) as total_due
         FROM customers c
         LEFT JOIN (
@@ -149,9 +152,6 @@ router.get('/', async (req, res) => {
             AND (notes IS NULL OR notes NOT LIKE 'Galla Opening Balance%')
           GROUP BY customer_id
         ) cash ON cash.customer_id = c.id
-        LEFT JOIN (
-          SELECT customer_id, SUM(amount) as total_commission FROM expenses WHERE category = 'Commission' GROUP BY customer_id
-        ) comm ON comm.customer_id = c.id
         WHERE c.deleted_at IS NULL
       )
       SELECT COALESCE(SUM(total_due), 0) as total FROM customer_net_due WHERE total_due > 0
@@ -184,9 +184,11 @@ router.get('/', async (req, res) => {
     // jaisa hi). orders_due yahan sirf INFORMATIONAL hai (raw order-balance,
     // display ke liye "X orders pending" jaisa), lekin total_due (jo asal
     // sorting/filtering karta hai) ab poora account leta hai — order-payments,
-    // UPI, cleared-cheques, cash-income, commission, discount sab. Isliye ab
+    // UPI, cleared-cheques, cash-income, discount sab. Isliye ab
     // koi bhi customer jiska net-balance actually credit (negative) hai, is
     // list mein kabhi nahi aayega — chahe uska koi order-level balance_due ho.
+    // NOTE: Commission is due-calc mein bilkul include nahi — poori tarah alag,
+    // independent expense hai (sirf Accounts → Commission tab mein track hoti).
     const allDues = await dbAllAsync(`
       SELECT * FROM (
         SELECT
@@ -205,7 +207,6 @@ router.get('/', async (req, res) => {
             - COALESCE(cheq.total_cheque_cleared, 0)
             - COALESCE(cash.total_cash_income, 0)
             - COALESCE(oa.orders_discount, 0)
-            + COALESCE(comm.total_commission, 0)
           ) as total_due
         FROM customers c
         LEFT JOIN (
@@ -236,9 +237,6 @@ router.get('/', async (req, res) => {
             AND (notes IS NULL OR notes NOT LIKE 'Galla Opening Balance%')
           GROUP BY customer_id
         ) cash ON cash.customer_id = c.id
-        LEFT JOIN (
-          SELECT customer_id, SUM(amount) as total_commission FROM expenses WHERE category = 'Commission' GROUP BY customer_id
-        ) comm ON comm.customer_id = c.id
         WHERE c.deleted_at IS NULL
       )
       WHERE total_due > 0

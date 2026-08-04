@@ -158,17 +158,6 @@ function DailySales() {
   const [commSelectedCustomer, setCommSelectedCustomer] = useState(null)
   const [showCommDropdown, setShowCommDropdown] = useState(false)
 
-  // Commission split calculator — "gross" is the extra-bill amount (billed minus
-  // real work), "percent" is how much of that we keep as our own income. The
-  // rest auto-fills the Amount field below (that's what actually leaves the
-  // drawer / gets returned to the customer).
-  const [commGross, setCommGross] = useState('')
-  const [commPercent, setCommPercent] = useState('')
-  const commGrossNum = parseFloat(commGross) || 0
-  const commPercentNum = parseFloat(commPercent) || 0
-  const commKeptAmount = commGrossNum > 0 && commPercentNum > 0 ? Math.round(commGrossNum * commPercentNum / 100) : 0
-  const commReturnAmount = commGrossNum > 0 ? Math.max(0, Math.round(commGrossNum - commKeptAmount)) : 0
-
   const [expenses, setExpenses] = useState([])
   const [summary, setSummary] = useState(null)
   const [filterMonth, setFilterMonth] = useState(currentMonth)
@@ -180,15 +169,6 @@ function DailySales() {
     getEmployees().then(res => setEmployees(res.data)).catch(() => {})
     getVendors().then(res => setVendors(res.data)).catch(() => {})
   }, [filterMonth, filterYear]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Commission split calculator ka return-amount hi asli "Amount" hai (jo cash
-  // drawer se nikalta hai / customer ko wapis jaata hai) — jab bhi gross ya %
-  // change ho aur category Commission ho, Amount field ko auto-sync kar do.
-  useEffect(() => {
-    if (expenseForm.category === 'Commission' && commGrossNum > 0 && commPercentNum > 0) {
-      setExpenseForm(f => ({ ...f, amount: String(commReturnAmount) }))
-    }
-  }, [commGrossNum, commPercentNum, expenseForm.category]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // The tracking setting isn't just needed on the Galla tab — Record Entry
   // (cash income + expense) also needs to know immediately whether to show
@@ -471,8 +451,6 @@ function DailySales() {
       return showMsg('Select a customer for the commission.', 'error')
     }
 
-    const isCommissionSplit = expenseForm.category === 'Commission' && commGrossNum > 0 && commPercentNum > 0
-
     const payload = {
       category: expenseForm.category,
       amount: parseInt(expenseForm.amount, 10),
@@ -486,22 +464,13 @@ function DailySales() {
       customer_name: expenseForm.customer_name || null,
       denomination_breakdown: expenseForm.payment_mode === 'cash' && Object.keys(expenseDenomination).length > 0
         ? expenseDenomination
-        : null,
-      // Commission split — kitna hum apne paas rakh rahe hain (income), taaki
-      // wo alag se track ho, na ki sirf return-amount (expense) hi dikhe
-      ...(isCommissionSplit ? {
-        commission_gross_amount: commGrossNum,
-        commission_percent: commPercentNum,
-        commission_kept_amount: commKeptAmount
-      } : {})
+        : null
     }
 
     setExpenseSubmitting(true)
     addExpense(payload)
       .then(() => {
-        showMsg(isCommissionSplit
-          ? `Recorded: ₹${commKeptAmount.toLocaleString('en-IN')} kept as your income, ₹${commReturnAmount.toLocaleString('en-IN')} returned to customer.`
-          : `Expense of ₹${expenseForm.amount} added.`)
+        showMsg(`Expense of ₹${expenseForm.amount} added.`)
         setExpenseForm({
           category: '', amount: '', description: '',
           expense_date: today, payment_mode: 'cash',
@@ -510,8 +479,6 @@ function DailySales() {
         })
         setCommSelectedCustomer(null)
         setCommCustomerSearch('')
-        setCommGross('')
-        setCommPercent('')
         setExpenseDenomination({})
         fetchAll()
         fetchDrawer()
@@ -855,7 +822,7 @@ function DailySales() {
                         paid_to_type: cat === 'Employee Advance' ? 'employee' : cat === 'Vendor Payment' ? 'vendor' : null,
                         paid_to_id: '', customer_id: '', customer_name: ''
                       })
-                      if (cat !== 'Commission') { setCommSelectedCustomer(null); setCommCustomerSearch(''); setCommGross(''); setCommPercent('') }
+                      if (cat !== 'Commission') { setCommSelectedCustomer(null); setCommCustomerSearch('') }
                     }}
                   >
                     <option value="">Select Category</option>
@@ -924,44 +891,7 @@ function DailySales() {
                         <CheckCircle2 className="w-3.5 h-3.5" /> {commSelectedCustomer.firm_name}
                       </div>
                     )}
-
-                    <div className="mt-3 pt-3 border-t border-orange-500/20 grid grid-cols-2 gap-2.5">
-                      <div>
-                        <label className="text-[11px] font-semibold text-orange-400/90 block mb-1.5">Total Extra Amount (Bill − Real Work) ₹</label>
-                        <input
-                          className={inputClasses}
-                          type="number"
-                          placeholder="e.g. 4500"
-                          value={commGross}
-                          onChange={e => setCommGross(e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-semibold text-orange-400/90 block mb-1.5">Commission % You Keep</label>
-                        <input
-                          className={inputClasses}
-                          type="number"
-                          placeholder="e.g. 15"
-                          value={commPercent}
-                          onChange={e => setCommPercent(e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    {commGrossNum > 0 && commPercentNum > 0 && (
-                      <div className="mt-2.5 grid grid-cols-2 gap-2.5">
-                        <div className="px-3 py-2 bg-emerald-500/15 border border-emerald-500/30 rounded-xl">
-                          <div className="text-[10px] font-semibold text-emerald-400/80">Your Income (Kept)</div>
-                          <div className="text-sm font-bold text-emerald-400">₹{commKeptAmount.toLocaleString('en-IN')}</div>
-                        </div>
-                        <div className="px-3 py-2 bg-orange-500/15 border border-orange-500/30 rounded-xl">
-                          <div className="text-[10px] font-semibold text-orange-400/80">Returning to Customer</div>
-                          <div className="text-sm font-bold text-orange-400">₹{commReturnAmount.toLocaleString('en-IN')}</div>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="text-[11px] text-orange-400 mt-2.5 flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" /> Only the "Returning to Customer" amount is deducted from Cash Drawer / UPI. Your kept share is recorded as commission income, not an expense.</div>
+                    <div className="text-[11px] text-orange-400 mt-2 flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" /> This amount is being returned to the customer — deducted from Cash Drawer / UPI</div>
                   </div>
                 )}
 
